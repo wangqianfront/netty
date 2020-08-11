@@ -16,6 +16,7 @@
 package io.netty.buffer;
 
 import io.netty.util.IllegalReferenceCountException;
+import io.netty.util.internal.ObjectUtil;
 import io.netty.util.internal.StringUtil;
 
 /**
@@ -27,10 +28,7 @@ public class DefaultByteBufHolder implements ByteBufHolder {
     private final ByteBuf data;
 
     public DefaultByteBufHolder(ByteBuf data) {
-        if (data == null) {
-            throw new NullPointerException("data");
-        }
-        this.data = data;
+        this.data = ObjectUtil.checkNotNull(data, "data");
     }
 
     @Override
@@ -41,14 +39,46 @@ public class DefaultByteBufHolder implements ByteBufHolder {
         return data;
     }
 
+    /**
+     * {@inheritDoc}
+     * <p>
+     * This method calls {@code replace(content().copy())} by default.
+     */
     @Override
     public ByteBufHolder copy() {
-        return new DefaultByteBufHolder(data.copy());
+        return replace(data.copy());
     }
 
+    /**
+     * {@inheritDoc}
+     * <p>
+     * This method calls {@code replace(content().duplicate())} by default.
+     */
     @Override
     public ByteBufHolder duplicate() {
-        return new DefaultByteBufHolder(data.duplicate());
+        return replace(data.duplicate());
+    }
+
+    /**
+     * {@inheritDoc}
+     * <p>
+     * This method calls {@code replace(content().retainedDuplicate())} by default.
+     */
+    @Override
+    public ByteBufHolder retainedDuplicate() {
+        return replace(data.retainedDuplicate());
+    }
+
+    /**
+     * {@inheritDoc}
+     * <p>
+     * Override this method to return a new instance of this object whose content is set to the specified
+     * {@code content}. The default implementation of {@link #copy()}, {@link #duplicate()} and
+     * {@link #retainedDuplicate()} invokes this method to create a copy.
+     */
+    @Override
+    public ByteBufHolder replace(ByteBuf content) {
+        return new DefaultByteBufHolder(content);
     }
 
     @Override
@@ -91,7 +121,7 @@ public class DefaultByteBufHolder implements ByteBufHolder {
     }
 
     /**
-     * Return {@link ByteBuf#toString()} without checking the reference count first. This is useful to implemement
+     * Return {@link ByteBuf#toString()} without checking the reference count first. This is useful to implement
      * {@link #toString()}.
      */
     protected final String contentToString() {
@@ -101,5 +131,32 @@ public class DefaultByteBufHolder implements ByteBufHolder {
     @Override
     public String toString() {
         return StringUtil.simpleClassName(this) + '(' + contentToString() + ')';
+    }
+
+    /**
+     * This implementation of the {@code equals} operation is restricted to
+     * work only with instances of the same class. The reason for that is that
+     * Netty library already has a number of classes that extend {@link DefaultByteBufHolder} and
+     * override {@code equals} method with an additional comparison logic and we
+     * need the symmetric property of the {@code equals} operation to be preserved.
+     *
+     * @param   o   the reference object with which to compare.
+     * @return  {@code true} if this object is the same as the obj
+     *          argument; {@code false} otherwise.
+     */
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o != null && getClass() == o.getClass()) {
+            return data.equals(((DefaultByteBufHolder) o).data);
+        }
+        return false;
+    }
+
+    @Override
+    public int hashCode() {
+        return data.hashCode();
     }
 }

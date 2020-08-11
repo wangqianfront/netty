@@ -16,13 +16,22 @@
 package io.netty.handler.ssl;
 
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
+import org.junit.BeforeClass;
 
 import javax.net.ssl.SSLException;
 import java.io.File;
 
+import static org.junit.Assume.assumeTrue;
+
 public class OpenSslClientContextTest extends SslContextTest  {
+
+    @BeforeClass
+    public static void checkOpenSsl() {
+        assumeTrue(OpenSsl.isAvailable());
+    }
+
     @Override
-    protected SslContext newServerContext(File crtFile, File keyFile, String pass) throws SSLException {
+    protected SslContext newSslContext(File crtFile, File keyFile, String pass) throws SSLException {
         return new OpenSslClientContext(crtFile, InsecureTrustManagerFactory.INSTANCE, crtFile, keyFile, pass,
                 null, null, IdentityCipherSuiteFilter.INSTANCE, ApplicationProtocolConfig.DISABLED, 0, 0);
     }

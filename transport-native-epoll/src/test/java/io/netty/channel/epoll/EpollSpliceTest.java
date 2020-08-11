@@ -27,13 +27,13 @@ import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.unix.FileDescriptor;
+import io.netty.util.NetUtil;
 import org.junit.Assert;
 import org.junit.Test;
 
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
-import java.net.InetSocketAddress;
 import java.util.Random;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -58,7 +58,7 @@ public class EpollSpliceTest {
         ServerBootstrap bs = new ServerBootstrap();
         bs.channel(EpollServerSocketChannel.class);
         bs.group(group).childHandler(sh);
-        final Channel sc = bs.bind(new InetSocketAddress(0)).syncUninterruptibly().channel();
+        final Channel sc = bs.bind(NetUtil.LOCALHOST, 0).syncUninterruptibly().channel();
 
         ServerBootstrap bs2 = new ServerBootstrap();
         bs2.channel(EpollServerSocketChannel.class);
@@ -124,7 +124,7 @@ public class EpollSpliceTest {
                 });
             }
         });
-        Channel pc = bs2.bind(new InetSocketAddress(0)).syncUninterruptibly().channel();
+        Channel pc = bs2.bind(NetUtil.LOCALHOST, 0).syncUninterruptibly().channel();
 
         Bootstrap cb = new Bootstrap();
         cb.group(group);
@@ -189,7 +189,7 @@ public class EpollSpliceTest {
         }
     }
 
-    @Test
+    @Test(timeout = 10000)
     public void spliceToFile() throws Throwable {
         EventLoopGroup group = new EpollEventLoopGroup(1);
         File file = File.createTempFile("netty-splice", null);
@@ -200,7 +200,7 @@ public class EpollSpliceTest {
         bs.channel(EpollServerSocketChannel.class);
         bs.group(group).childHandler(sh);
         bs.childOption(EpollChannelOption.EPOLL_MODE, EpollMode.LEVEL_TRIGGERED);
-        Channel sc = bs.bind(new InetSocketAddress(0)).syncUninterruptibly().channel();
+        Channel sc = bs.bind(NetUtil.LOCALHOST, 0).syncUninterruptibly().channel();
 
         Bootstrap cb = new Bootstrap();
         cb.group(group);
@@ -215,7 +215,7 @@ public class EpollSpliceTest {
             i += length;
         }
 
-        while (sh.future == null || !sh.future.isDone()) {
+        while (sh.future2 == null || !sh.future2.isDone() || !sh.future.isDone()) {
             if (sh.exception.get() != null) {
                 break;
             }
@@ -291,22 +291,22 @@ public class EpollSpliceTest {
     private static class SpliceHandler extends ChannelInboundHandlerAdapter {
         private final File file;
 
-        volatile Channel channel;
         volatile ChannelFuture future;
+        volatile ChannelFuture future2;
         final AtomicReference<Throwable> exception = new AtomicReference<Throwable>();
 
-        public SpliceHandler(File file) {
+        SpliceHandler(File file) {
             this.file = file;
         }
 
         @Override
-        public void channelActive(ChannelHandlerContext ctx)
-                throws Exception {
-            channel = ctx.channel();
+        public void channelActive(ChannelHandlerContext ctx) throws Exception {
             final EpollSocketChannel ch = (EpollSocketChannel) ctx.channel();
             final FileDescriptor fd = FileDescriptor.from(file);
 
-            future = ch.spliceTo(fd, 0, data.length);
+            // splice two halves separately to test starting offset
+            future = ch.spliceTo(fd, 0, data.length / 2);
+            future2 = ch.spliceTo(fd, data.length / 2, data.length / 2);
         }
 
         @Override

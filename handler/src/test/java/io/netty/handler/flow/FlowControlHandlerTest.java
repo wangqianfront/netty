@@ -15,25 +15,6 @@
  */
 package io.netty.handler.flow;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertThat;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
-
-import java.net.SocketAddress;
-import java.util.List;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Exchanger;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
-
-import org.hamcrest.collection.IsIterableContainingInOrder;
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
-import org.junit.Test;
-
 import io.netty.bootstrap.Bootstrap;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.ByteBuf;
@@ -48,11 +29,28 @@ import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
 import io.netty.channel.ChannelPipeline;
 import io.netty.channel.EventLoopGroup;
+import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.handler.codec.ByteToMessageDecoder;
+import io.netty.handler.timeout.IdleStateEvent;
+import io.netty.handler.timeout.IdleStateHandler;
 import io.netty.util.ReferenceCountUtil;
+import org.junit.AfterClass;
+import org.junit.BeforeClass;
+import org.junit.Test;
+
+import java.net.SocketAddress;
+import java.util.List;
+import java.util.Queue;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Exchanger;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.atomic.AtomicReference;
+
+import static java.util.concurrent.TimeUnit.*;
+import static org.junit.Assert.*;
 
 public class FlowControlHandlerTest {
     private static EventLoopGroup GROUP;
@@ -83,7 +81,7 @@ public class FlowControlHandlerTest {
             .childOption(ChannelOption.AUTO_READ, autoRead)
             .childHandler(new ChannelInitializer<Channel>() {
                 @Override
-                protected void initChannel(Channel ch) throws Exception {
+                protected void initChannel(Channel ch) {
                     ChannelPipeline pipeline = ch.pipeline();
                     pipeline.addLast(new OneByteToThreeStringsDecoder());
                     pipeline.addLast(handlers);
@@ -147,7 +145,7 @@ public class FlowControlHandlerTest {
 
             // We received three messages even through auto reading
             // was turned off after we received the first message.
-            assertTrue(latch.await(1L, TimeUnit.SECONDS));
+            assertTrue(latch.await(1L, SECONDS));
         } finally {
             client.close();
             server.close();
@@ -171,7 +169,7 @@ public class FlowControlHandlerTest {
         ChannelInboundHandlerAdapter handler = new ChannelInboundHandlerAdapter() {
             @Override
             public void channelActive(ChannelHandlerContext ctx) throws Exception {
-                peerRef.exchange(ctx.channel(), 1L, TimeUnit.SECONDS);
+                peerRef.exchange(ctx.channel(), 1L, SECONDS);
                 ctx.fireChannelActive();
             }
 
@@ -187,7 +185,7 @@ public class FlowControlHandlerTest {
 
         try {
             // The client connection on the server side
-            Channel peer = peerRef.exchange(null, 1L, TimeUnit.SECONDS);
+            Channel peer = peerRef.exchange(null, 1L, SECONDS);
 
             // Write the message
             client.writeAndFlush(newOneMessage())
@@ -199,7 +197,7 @@ public class FlowControlHandlerTest {
             // We received all three messages but hoped that only one
             // message was read because auto reading was off and we
             // invoked the read() method only once.
-            assertTrue(latch.await(1L, TimeUnit.SECONDS));
+            assertTrue(latch.await(1L, SECONDS));
         } finally {
             client.close();
             server.close();
@@ -230,8 +228,8 @@ public class FlowControlHandlerTest {
                 .syncUninterruptibly();
 
             // We should receive 3 messages
-            assertTrue(latch.await(1L, TimeUnit.SECONDS));
-            assertTrue(flow.queue().isEmpty());
+            assertTrue(latch.await(1L, SECONDS));
+            assertTrue(flow.isQueueEmpty());
         } finally {
             client.close();
             server.close();
@@ -245,28 +243,48 @@ public class FlowControlHandlerTest {
     @Test
     public void testFlowToggleAutoRead() throws Exception {
         final Exchanger<Channel> peerRef = new Exchanger<Channel>();
-        final AtomicReference<CountDownLatch> latchRef
-            = new AtomicReference<CountDownLatch>(new CountDownLatch(1));
-
-        final AtomicInteger counter = new AtomicInteger();
+        final CountDownLatch msgRcvLatch1 = new CountDownLatch(1);
+        final CountDownLatch msgRcvLatch2 = new CountDownLatch(1);
+        final CountDownLatch msgRcvLatch3 = new CountDownLatch(1);
+        final CountDownLatch setAutoReadLatch1 = new CountDownLatch(1);
+        final CountDownLatch setAutoReadLatch2 = new CountDownLatch(1);
 
         ChannelInboundHandlerAdapter handler = new ChannelInboundHandlerAdapter() {
+            private int msgRcvCount;
+            private int expectedMsgCount;
             @Override
             public void channelActive(ChannelHandlerContext ctx) throws Exception {
-                peerRef.exchange(ctx.channel(), 1L, TimeUnit.SECONDS);
+                peerRef.exchange(ctx.channel(), 1L, SECONDS);
                 ctx.fireChannelActive();
             }
 
             @Override
-            public void channelRead(ChannelHandlerContext ctx, Object msg) {
+            public void channelRead(ChannelHandlerContext ctx, Object msg) throws InterruptedException {
                 ReferenceCountUtil.release(msg);
 
                 // Disable auto reading after each message
-                counter.incrementAndGet();
                 ctx.channel().config().setAutoRead(false);
 
-                CountDownLatch latch = latchRef.get();
-                latch.countDown();
+                if (msgRcvCount++ != expectedMsgCount) {
+                    return;
+                }
+                switch (msgRcvCount) {
+                    case 1:
+                        msgRcvLatch1.countDown();
+                        if (setAutoReadLatch1.await(1L, SECONDS)) {
+                            ++expectedMsgCount;
+                        }
+                        break;
+                    case 2:
+                        msgRcvLatch2.countDown();
+                        if (setAutoReadLatch2.await(1L, SECONDS)) {
+                            ++expectedMsgCount;
+                        }
+                        break;
+                    default:
+                        msgRcvLatch3.countDown();
+                        break;
+                }
             }
         };
 
@@ -275,32 +293,24 @@ public class FlowControlHandlerTest {
         Channel client = newClient(server.localAddress());
         try {
             // The client connection on the server side
-            Channel peer = peerRef.exchange(null, 1L, TimeUnit.SECONDS);
+            Channel peer = peerRef.exchange(null, 1L, SECONDS);
 
             client.writeAndFlush(newOneMessage())
                 .syncUninterruptibly();
 
             // channelRead(1)
-            assertTrue(latchRef.get().await(1L, TimeUnit.SECONDS));
-            assertFalse(peer.config().isAutoRead());
-            assertEquals(1, counter.get());
-            assertThat(flow.queue(), IsIterableContainingInOrder.<Object>contains("2", "3"));
+            assertTrue(msgRcvLatch1.await(1L, SECONDS));
 
             // channelRead(2)
-            latchRef.set(new CountDownLatch(1));
             peer.config().setAutoRead(true);
-            assertTrue(latchRef.get().await(1L, TimeUnit.SECONDS));
-            assertFalse(peer.config().isAutoRead());
-            assertEquals(2, counter.get());
-            assertThat(flow.queue(), IsIterableContainingInOrder.<Object>contains("3"));
+            setAutoReadLatch1.countDown();
+            assertTrue(msgRcvLatch1.await(1L, SECONDS));
 
             // channelRead(3)
-            latchRef.set(new CountDownLatch(1));
             peer.config().setAutoRead(true);
-            assertTrue(latchRef.get().await(1L, TimeUnit.SECONDS));
-            assertFalse(peer.config().isAutoRead());
-            assertEquals(3, counter.get());
-            assertTrue(flow.queue().isEmpty());
+            setAutoReadLatch2.countDown();
+            assertTrue(msgRcvLatch3.await(1L, SECONDS));
+            assertTrue(flow.isQueueEmpty());
         } finally {
             client.close();
             server.close();
@@ -315,23 +325,22 @@ public class FlowControlHandlerTest {
     @Test
     public void testFlowAutoReadOff() throws Exception {
         final Exchanger<Channel> peerRef = new Exchanger<Channel>();
-        final AtomicReference<CountDownLatch> latchRef
-            = new AtomicReference<CountDownLatch>(new CountDownLatch(1));
-        final AtomicInteger counter = new AtomicInteger();
+        final CountDownLatch msgRcvLatch1 = new CountDownLatch(1);
+        final CountDownLatch msgRcvLatch2 = new CountDownLatch(2);
+        final CountDownLatch msgRcvLatch3 = new CountDownLatch(3);
 
         ChannelInboundHandlerAdapter handler = new ChannelDuplexHandler() {
             @Override
             public void channelActive(ChannelHandlerContext ctx) throws Exception {
-                peerRef.exchange(ctx.channel(), 1L, TimeUnit.SECONDS);
                 ctx.fireChannelActive();
+                peerRef.exchange(ctx.channel(), 1L, SECONDS);
             }
 
             @Override
             public void channelRead(ChannelHandlerContext ctx, Object msg) {
-                counter.incrementAndGet();
-
-                CountDownLatch latch = latchRef.get();
-                latch.countDown();
+                msgRcvLatch1.countDown();
+                msgRcvLatch2.countDown();
+                msgRcvLatch3.countDown();
             }
         };
 
@@ -340,7 +349,7 @@ public class FlowControlHandlerTest {
         Channel client = newClient(server.localAddress());
         try {
             // The client connection on the server side
-            Channel peer = peerRef.exchange(null, 1L, TimeUnit.SECONDS);
+            Channel peer = peerRef.exchange(null, 1L, SECONDS);
 
             // Write the message
             client.writeAndFlush(newOneMessage())
@@ -348,23 +357,181 @@ public class FlowControlHandlerTest {
 
             // channelRead(1)
             peer.read();
-            assertTrue(latchRef.get().await(1L, TimeUnit.SECONDS));
-            assertEquals(1, counter.get());
-            assertThat(flow.queue(), IsIterableContainingInOrder.<Object>contains("2", "3"));
+            assertTrue(msgRcvLatch1.await(1L, SECONDS));
 
             // channelRead(2)
-            latchRef.set(new CountDownLatch(1));
             peer.read();
-            assertTrue(latchRef.get().await(1L, TimeUnit.SECONDS));
-            assertEquals(2, counter.get());
-            assertThat(flow.queue(), IsIterableContainingInOrder.<Object>contains("3"));
+            assertTrue(msgRcvLatch2.await(1L, SECONDS));
 
             // channelRead(3)
-            latchRef.set(new CountDownLatch(1));
             peer.read();
-            assertTrue(latchRef.get().await(1L, TimeUnit.SECONDS));
-            assertEquals(3, counter.get());
-            assertTrue(flow.queue().isEmpty());
+            assertTrue(msgRcvLatch3.await(1L, SECONDS));
+            assertTrue(flow.isQueueEmpty());
+        } finally {
+            client.close();
+            server.close();
+        }
+    }
+
+    @Test
+    public void testReentranceNotCausesNPE() throws Throwable {
+        final Exchanger<Channel> peerRef = new Exchanger<Channel>();
+        final CountDownLatch latch = new CountDownLatch(3);
+        final AtomicReference<Throwable> causeRef = new AtomicReference<Throwable>();
+        ChannelInboundHandlerAdapter handler = new ChannelDuplexHandler() {
+            @Override
+            public void channelActive(ChannelHandlerContext ctx) throws Exception {
+                ctx.fireChannelActive();
+                peerRef.exchange(ctx.channel(), 1L, SECONDS);
+            }
+
+            @Override
+            public void channelRead(ChannelHandlerContext ctx, Object msg) {
+                latch.countDown();
+                ctx.read();
+            }
+
+            @Override
+            public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
+                causeRef.set(cause);
+            }
+        };
+
+        FlowControlHandler flow = new FlowControlHandler();
+        Channel server = newServer(false, flow, handler);
+        Channel client = newClient(server.localAddress());
+        try {
+            // The client connection on the server side
+            Channel peer = peerRef.exchange(null, 1L, SECONDS);
+
+            // Write the message
+            client.writeAndFlush(newOneMessage())
+                    .syncUninterruptibly();
+
+            // channelRead(1)
+            peer.read();
+            assertTrue(latch.await(1L, SECONDS));
+            assertTrue(flow.isQueueEmpty());
+
+            Throwable cause = causeRef.get();
+            if (cause != null) {
+                throw cause;
+            }
+        } finally {
+            client.close();
+            server.close();
+        }
+    }
+
+    @Test
+    public void testSwallowedReadComplete() throws Exception {
+        final long delayMillis = 100;
+        final Queue<IdleStateEvent> userEvents = new LinkedBlockingQueue<IdleStateEvent>();
+        final EmbeddedChannel channel = new EmbeddedChannel(false, false,
+            new FlowControlHandler(),
+            new IdleStateHandler(delayMillis, 0, 0, MILLISECONDS),
+            new ChannelInboundHandlerAdapter() {
+                @Override
+                public void channelActive(ChannelHandlerContext ctx) {
+                    ctx.fireChannelActive();
+                    ctx.read();
+                }
+
+                @Override
+                public void channelRead(ChannelHandlerContext ctx, Object msg) {
+                    ctx.fireChannelRead(msg);
+                    ctx.read();
+                }
+
+                @Override
+                public void channelReadComplete(ChannelHandlerContext ctx) {
+                    ctx.fireChannelReadComplete();
+                    ctx.read();
+                }
+
+                @Override
+                public void userEventTriggered(ChannelHandlerContext ctx, Object evt) {
+                    if (evt instanceof IdleStateEvent) {
+                        userEvents.add((IdleStateEvent) evt);
+                    }
+                    ctx.fireUserEventTriggered(evt);
+                }
+            }
+        );
+
+        channel.config().setAutoRead(false);
+        assertFalse(channel.config().isAutoRead());
+
+        channel.register();
+
+        // Reset read timeout by some message
+        assertTrue(channel.writeInbound(Unpooled.EMPTY_BUFFER));
+        channel.flushInbound();
+        assertEquals(Unpooled.EMPTY_BUFFER, channel.readInbound());
+
+        // Emulate 'no more messages in NIO channel' on the next read attempt.
+        channel.flushInbound();
+        assertNull(channel.readInbound());
+
+        Thread.sleep(delayMillis + 20L);
+        channel.runPendingTasks();
+        assertEquals(IdleStateEvent.FIRST_READER_IDLE_STATE_EVENT, userEvents.poll());
+        assertFalse(channel.finish());
+    }
+
+    @Test
+    public void testRemoveFlowControl() throws Exception {
+        final CountDownLatch latch = new CountDownLatch(3);
+
+        ChannelInboundHandlerAdapter handler = new ChannelDuplexHandler() {
+            @Override
+            public void channelActive(ChannelHandlerContext ctx) throws Exception {
+                //do the first read
+                ctx.read();
+                super.channelActive(ctx);
+            }
+            @Override
+            public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+                latch.countDown();
+                super.channelRead(ctx, msg);
+            }
+        };
+
+        FlowControlHandler flow = new FlowControlHandler() {
+            private int num;
+            @Override
+            public void channelRead(final ChannelHandlerContext ctx, Object msg) throws Exception {
+                super.channelRead(ctx, msg);
+                ++num;
+                if (num >= 3) {
+                    //We have received 3 messages. Remove myself later
+                    final ChannelHandler handler = this;
+                    ctx.channel().eventLoop().execute(new Runnable() {
+                        @Override
+                        public void run() {
+                            ctx.pipeline().remove(handler);
+                        }
+                    });
+                }
+            }
+        };
+        ChannelInboundHandlerAdapter tail = new ChannelInboundHandlerAdapter() {
+            @Override
+            public void channelRead(ChannelHandlerContext ctx, Object msg) {
+                //consume this msg
+                ReferenceCountUtil.release(msg);
+            }
+        };
+
+        Channel server = newServer(false /* no auto read */, flow, handler, tail);
+        Channel client = newClient(server.localAddress());
+        try {
+            // Write one message
+            client.writeAndFlush(newOneMessage()).sync();
+
+            // We should receive 3 messages
+            assertTrue(latch.await(1L, SECONDS));
+            assertTrue(flow.isQueueEmpty());
         } finally {
             client.close();
             server.close();
@@ -377,7 +544,7 @@ public class FlowControlHandlerTest {
      */
     private static final class OneByteToThreeStringsDecoder extends ByteToMessageDecoder {
         @Override
-        protected void decode(ChannelHandlerContext ctx, ByteBuf in, List<Object> out) throws Exception {
+        protected void decode(ChannelHandlerContext ctx, ByteBuf in, List<Object> out) {
             for (int i = 0; i < in.readableBytes(); i++) {
                 out.add("1");
                 out.add("2");

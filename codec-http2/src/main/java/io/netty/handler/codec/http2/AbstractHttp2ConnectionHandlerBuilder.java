@@ -16,11 +16,16 @@
 
 package io.netty.handler.codec.http2;
 
+import io.netty.channel.Channel;
 import io.netty.handler.codec.http2.Http2HeadersEncoder.SensitivityDetector;
+import io.netty.util.internal.ObjectUtil;
+import io.netty.util.internal.UnstableApi;
 
+import static io.netty.handler.codec.http2.Http2CodecUtil.DEFAULT_HEADER_LIST_SIZE;
+import static io.netty.handler.codec.http2.Http2CodecUtil.DEFAULT_MAX_RESERVED_STREAMS;
+import static io.netty.handler.codec.http2.Http2PromisedRequestVerifier.ALWAYS_VERIFY;
 import static io.netty.util.internal.ObjectUtil.checkNotNull;
-import static java.util.concurrent.TimeUnit.MILLISECONDS;
-import static java.util.concurrent.TimeUnit.SECONDS;
+import static io.netty.util.internal.ObjectUtil.checkPositiveOrZero;
 
 /**
  * Abstract base class which defines commonly used features required to build {@link Http2ConnectionHandler} instances.
@@ -57,6 +62,7 @@ import static java.util.concurrent.TimeUnit.SECONDS;
  *   <li>{@link #frameLogger(Http2FrameLogger)}</li>
  *   <li>{@link #headerSensitivityDetector(SensitivityDetector)}</li>
  *   <li>{@link #encoderEnforceMaxConcurrentStreams(boolean)}</li>
+ *   <li>{@link #encoderIgnoreMaxHeaderListSize(boolean)}</li>
  * </ul>
  *
  * <h3>Exposing necessary methods in a subclass</h3>
@@ -66,20 +72,22 @@ import static java.util.concurrent.TimeUnit.SECONDS;
  * @param <T> The type of handler created by this builder.
  * @param <B> The concrete type of this builder.
  */
+@UnstableApi
 public abstract class AbstractHttp2ConnectionHandlerBuilder<T extends Http2ConnectionHandler,
                                                             B extends AbstractHttp2ConnectionHandlerBuilder<T, B>> {
 
-    private static final long DEFAULT_GRACEFUL_SHUTDOWN_TIMEOUT_MILLIS = MILLISECONDS.convert(30, SECONDS);
     private static final SensitivityDetector DEFAULT_HEADER_SENSITIVITY_DETECTOR = Http2HeadersEncoder.NEVER_SENSITIVE;
 
     // The properties that can always be set.
-    private Http2Settings initialSettings = new Http2Settings();
+    private Http2Settings initialSettings = Http2Settings.defaultSettings();
     private Http2FrameListener frameListener;
-    private long gracefulShutdownTimeoutMillis = DEFAULT_GRACEFUL_SHUTDOWN_TIMEOUT_MILLIS;
+    private long gracefulShutdownTimeoutMillis = Http2CodecUtil.DEFAULT_GRACEFUL_SHUTDOWN_TIMEOUT_MILLIS;
+    private boolean decoupleCloseAndGoAway;
 
     // The property that will prohibit connection() and codec() if set by server(),
-    // because this property is used only when this builder creates a Http2Connection.
+    // because this property is used only when this builder creates an Http2Connection.
     private Boolean isServer;
+    private Integer maxReservedStreams;
 
     // The property that will prohibit server() and codec() if set by connection().
     private Http2Connection connection;
@@ -95,6 +103,12 @@ public abstract class AbstractHttp2ConnectionHandlerBuilder<T extends Http2Conne
     private Http2FrameLogger frameLogger;
     private SensitivityDetector headerSensitivityDetector;
     private Boolean encoderEnforceMaxConcurrentStreams;
+    private Boolean encoderIgnoreMaxHeaderListSize;
+    private Http2PromisedRequestVerifier promisedRequestVerifier = ALWAYS_VERIFY;
+    private boolean autoAckSettingsFrame = true;
+    private boolean autoAckPingFrame = true;
+    private int maxQueuedControlFrames = Http2CodecUtil.DEFAULT_MAX_QUEUED_CONTROL_FRAMES;
+    private int maxConsecutiveEmptyFrames = 2;
 
     /**
      * Sets the {@link Http2Settings} to use for the initial connection settings exchange.
@@ -130,7 +144,8 @@ public abstract class AbstractHttp2ConnectionHandlerBuilder<T extends Http2Conne
     }
 
     /**
-     * Returns the graceful shutdown timeout of the {@link Http2Connection} in milliseconds.
+     * Returns the graceful shutdown timeout of the {@link Http2Connection} in milliseconds. Returns -1 if the
+     * timeout is indefinite.
      */
     protected long gracefulShutdownTimeoutMillis() {
         return gracefulShutdownTimeoutMillis;
@@ -140,6 +155,10 @@ public abstract class AbstractHttp2ConnectionHandlerBuilder<T extends Http2Conne
      * Sets the graceful shutdown timeout of the {@link Http2Connection} in milliseconds.
      */
     protected B gracefulShutdownTimeoutMillis(long gracefulShutdownTimeoutMillis) {
+        if (gracefulShutdownTimeoutMillis < -1) {
+            throw new IllegalArgumentException("gracefulShutdownTimeoutMillis: " + gracefulShutdownTimeoutMillis +
+                                               " (expected: -1 for indefinite or >= 0)");
+        }
         this.gracefulShutdownTimeoutMillis = gracefulShutdownTimeoutMillis;
         return self();
     }
@@ -166,6 +185,29 @@ public abstract class AbstractHttp2ConnectionHandlerBuilder<T extends Http2Conne
     }
 
     /**
+     * Get the maximum number of streams which can be in the reserved state at any given time.
+     * <p>
+     * By default this value will be ignored on the server for local endpoint. This is because the RFC provides
+     * no way to explicitly communicate a limit to how many states can be in the reserved state, and instead relies
+     * on the peer to send RST_STREAM frames when they will be rejected.
+     */
+    protected int maxReservedStreams() {
+        return maxReservedStreams != null ? maxReservedStreams : DEFAULT_MAX_RESERVED_STREAMS;
+    }
+
+    /**
+     * Set the maximum number of streams which can be in the reserved state at any given time.
+     */
+    protected B maxReservedStreams(int maxReservedStreams) {
+        enforceConstraint("server", "connection", connection);
+        enforceConstraint("server", "codec", decoder);
+        enforceConstraint("server", "codec", encoder);
+
+        this.maxReservedStreams = checkPositiveOrZero(maxReservedStreams, "maxReservedStreams");
+        return self();
+    }
+
+    /**
      * Returns the {@link Http2Connection} to use.
      *
      * @return {@link Http2Connection} if set, or {@code null} if not set.
@@ -178,6 +220,7 @@ public abstract class AbstractHttp2ConnectionHandlerBuilder<T extends Http2Conne
      * Sets the {@link Http2Connection} to use.
      */
     protected B connection(Http2Connection connection) {
+        enforceConstraint("connection", "maxReservedStreams", maxReservedStreams);
         enforceConstraint("connection", "server", isServer);
         enforceConstraint("connection", "codec", decoder);
         enforceConstraint("connection", "codec", encoder);
@@ -210,6 +253,7 @@ public abstract class AbstractHttp2ConnectionHandlerBuilder<T extends Http2Conne
      */
     protected B codec(Http2ConnectionDecoder decoder, Http2ConnectionEncoder encoder) {
         enforceConstraint("codec", "server", isServer);
+        enforceConstraint("codec", "maxReservedStreams", maxReservedStreams);
         enforceConstraint("codec", "connection", connection);
         enforceConstraint("codec", "frameLogger", frameLogger);
         enforceConstraint("codec", "validateHeaders", validateHeaders);
@@ -284,6 +328,30 @@ public abstract class AbstractHttp2ConnectionHandlerBuilder<T extends Http2Conne
     }
 
     /**
+     * Returns the maximum number of queued control frames that are allowed before the connection is closed.
+     * This allows to protected against various attacks that can lead to high CPU / memory usage if the remote-peer
+     * floods us with frames that would have us produce control frames, but stops to read from the underlying socket.
+     *
+     * {@code 0} means no protection is in place.
+     */
+    protected int encoderEnforceMaxQueuedControlFrames() {
+        return maxQueuedControlFrames;
+    }
+
+    /**
+     * Sets the maximum number of queued control frames that are allowed before the connection is closed.
+     * This allows to protected against various attacks that can lead to high CPU / memory usage if the remote-peer
+     * floods us with frames that would have us produce control frames, but stops to read from the underlying socket.
+     *
+     * {@code 0} means no protection should be applied.
+     */
+    protected B encoderEnforceMaxQueuedControlFrames(int maxQueuedControlFrames) {
+        enforceNonCodecConstraints("encoderEnforceMaxQueuedControlFrames");
+        this.maxQueuedControlFrames = ObjectUtil.checkPositiveOrZero(maxQueuedControlFrames, "maxQueuedControlFrames");
+        return self();
+    }
+
+    /**
      * Returns the {@link SensitivityDetector} to use.
      */
     protected SensitivityDetector headerSensitivityDetector() {
@@ -300,6 +368,126 @@ public abstract class AbstractHttp2ConnectionHandlerBuilder<T extends Http2Conne
     }
 
     /**
+     * Sets if the <a href="https://tools.ietf.org/html/rfc7540#section-6.5.2">SETTINGS_MAX_HEADER_LIST_SIZE</a>
+     * should be ignored when encoding headers.
+     * @param ignoreMaxHeaderListSize {@code true} to ignore
+     * <a href="https://tools.ietf.org/html/rfc7540#section-6.5.2">SETTINGS_MAX_HEADER_LIST_SIZE</a>.
+     * @return this.
+     */
+    protected B encoderIgnoreMaxHeaderListSize(boolean ignoreMaxHeaderListSize) {
+        enforceNonCodecConstraints("encoderIgnoreMaxHeaderListSize");
+        this.encoderIgnoreMaxHeaderListSize = ignoreMaxHeaderListSize;
+        return self();
+    }
+
+    /**
+     * Does nothing, do not call.
+     *
+     * @deprecated Huffman decoding no longer depends on having a decode capacity.
+     */
+    @Deprecated
+    protected B initialHuffmanDecodeCapacity(int initialHuffmanDecodeCapacity) {
+        return self();
+    }
+
+    /**
+     * Set the {@link Http2PromisedRequestVerifier} to use.
+     * @return this.
+     */
+    protected B promisedRequestVerifier(Http2PromisedRequestVerifier promisedRequestVerifier) {
+        enforceNonCodecConstraints("promisedRequestVerifier");
+        this.promisedRequestVerifier = checkNotNull(promisedRequestVerifier, "promisedRequestVerifier");
+        return self();
+    }
+
+    /**
+     * Get the {@link Http2PromisedRequestVerifier} to use.
+     * @return the {@link Http2PromisedRequestVerifier} to use.
+     */
+    protected Http2PromisedRequestVerifier promisedRequestVerifier() {
+        return promisedRequestVerifier;
+    }
+
+    /**
+     * Returns the maximum number of consecutive empty DATA frames (without end_of_stream flag) that are allowed before
+     * the connection is closed. This allows to protected against the remote peer flooding us with such frames and
+     * so use up a lot of CPU. There is no valid use-case for empty DATA frames without end_of_stream flag.
+     *
+     * {@code 0} means no protection is in place.
+     */
+    protected int decoderEnforceMaxConsecutiveEmptyDataFrames() {
+        return maxConsecutiveEmptyFrames;
+    }
+
+    /**
+     * Sets the maximum number of consecutive empty DATA frames (without end_of_stream flag) that are allowed before
+     * the connection is closed. This allows to protected against the remote peer flooding us with such frames and
+     * so use up a lot of CPU. There is no valid use-case for empty DATA frames without end_of_stream flag.
+     *
+     * {@code 0} means no protection should be applied.
+     */
+    protected B decoderEnforceMaxConsecutiveEmptyDataFrames(int maxConsecutiveEmptyFrames) {
+        enforceNonCodecConstraints("maxConsecutiveEmptyFrames");
+        this.maxConsecutiveEmptyFrames = ObjectUtil.checkPositiveOrZero(
+                maxConsecutiveEmptyFrames, "maxConsecutiveEmptyFrames");
+        return self();
+    }
+
+    /**
+     * Determine if settings frame should automatically be acknowledged and applied.
+     * @return this.
+     */
+    protected B autoAckSettingsFrame(boolean autoAckSettings) {
+        enforceNonCodecConstraints("autoAckSettingsFrame");
+        this.autoAckSettingsFrame = autoAckSettings;
+        return self();
+    }
+
+    /**
+     * Determine if the SETTINGS frames should be automatically acknowledged and applied.
+     * @return {@code true} if the SETTINGS frames should be automatically acknowledged and applied.
+     */
+    protected boolean isAutoAckSettingsFrame() {
+        return autoAckSettingsFrame;
+    }
+
+    /**
+     * Determine if PING frame should automatically be acknowledged or not.
+     * @return this.
+     */
+    protected B autoAckPingFrame(boolean autoAckPingFrame) {
+        enforceNonCodecConstraints("autoAckPingFrame");
+        this.autoAckPingFrame = autoAckPingFrame;
+        return self();
+    }
+
+    /**
+     * Determine if the PING frames should be automatically acknowledged or not.
+     * @return {@code true} if the PING frames should be automatically acknowledged.
+     */
+    protected boolean isAutoAckPingFrame() {
+        return autoAckPingFrame;
+    }
+
+    /**
+     * Determine if the {@link Channel#close()} should be coupled with goaway and graceful close.
+     * @param decoupleCloseAndGoAway {@code true} to make {@link Channel#close()} directly close the underlying
+     *   transport, and not attempt graceful closure via GOAWAY.
+     * @return {@code this}.
+     */
+    protected B decoupleCloseAndGoAway(boolean decoupleCloseAndGoAway) {
+        this.decoupleCloseAndGoAway = decoupleCloseAndGoAway;
+        return self();
+    }
+
+    /**
+     * Determine if the {@link Channel#close()} should be coupled with goaway and graceful close.
+     */
+    protected boolean decoupleCloseAndGoAway() {
+        return decoupleCloseAndGoAway;
+    }
+
+    /**
      * Create a new {@link Http2ConnectionHandler}.
      */
     protected T build() {
@@ -310,15 +498,20 @@ public abstract class AbstractHttp2ConnectionHandlerBuilder<T extends Http2Conne
 
         Http2Connection connection = this.connection;
         if (connection == null) {
-            connection = new DefaultHttp2Connection(isServer());
+            connection = new DefaultHttp2Connection(isServer(), maxReservedStreams());
         }
 
         return buildFromConnection(connection);
     }
 
     private T buildFromConnection(Http2Connection connection) {
-        Http2FrameReader reader = new DefaultHttp2FrameReader(isValidateHeaders());
-        Http2FrameWriter writer = new DefaultHttp2FrameWriter(headerSensitivityDetector());
+        Long maxHeaderListSize = initialSettings.maxHeaderListSize();
+        Http2FrameReader reader = new DefaultHttp2FrameReader(new DefaultHttp2HeadersDecoder(isValidateHeaders(),
+                maxHeaderListSize == null ? DEFAULT_HEADER_LIST_SIZE : maxHeaderListSize,
+                /* initialHuffmanDecodeCapacity= */ -1));
+        Http2FrameWriter writer = encoderIgnoreMaxHeaderListSize == null ?
+                new DefaultHttp2FrameWriter(headerSensitivityDetector()) :
+                new DefaultHttp2FrameWriter(headerSensitivityDetector(), encoderIgnoreMaxHeaderListSize);
 
         if (frameLogger != null) {
             reader = new Http2InboundFrameLogger(reader, frameLogger);
@@ -328,6 +521,9 @@ public abstract class AbstractHttp2ConnectionHandlerBuilder<T extends Http2Conne
         Http2ConnectionEncoder encoder = new DefaultHttp2ConnectionEncoder(connection, writer);
         boolean encoderEnforceMaxConcurrentStreams = encoderEnforceMaxConcurrentStreams();
 
+        if (maxQueuedControlFrames != 0) {
+            encoder = new Http2ControlFrameLimitEncoder(encoder, maxQueuedControlFrames);
+        }
         if (encoderEnforceMaxConcurrentStreams) {
             if (connection.isServer()) {
                 encoder.close();
@@ -339,11 +535,16 @@ public abstract class AbstractHttp2ConnectionHandlerBuilder<T extends Http2Conne
             encoder = new StreamBufferingEncoder(encoder);
         }
 
-        Http2ConnectionDecoder decoder = new DefaultHttp2ConnectionDecoder(connection, encoder, reader);
+        DefaultHttp2ConnectionDecoder decoder = new DefaultHttp2ConnectionDecoder(connection, encoder, reader,
+                promisedRequestVerifier(), isAutoAckSettingsFrame(), isAutoAckPingFrame());
         return buildFromCodec(decoder, encoder);
     }
 
     private T buildFromCodec(Http2ConnectionDecoder decoder, Http2ConnectionEncoder encoder) {
+        int maxConsecutiveEmptyDataFrames = decoderEnforceMaxConsecutiveEmptyDataFrames();
+        if (maxConsecutiveEmptyDataFrames > 0) {
+            decoder = new Http2EmptyDataFrameConnectionDecoder(decoder, maxConsecutiveEmptyDataFrames);
+        }
         final T handler;
         try {
             // Call the abstract build method
@@ -351,7 +552,7 @@ public abstract class AbstractHttp2ConnectionHandlerBuilder<T extends Http2Conne
         } catch (Throwable t) {
             encoder.close();
             decoder.close();
-            throw new IllegalStateException("failed to build a Http2ConnectionHandler", t);
+            throw new IllegalStateException("failed to build an Http2ConnectionHandler", t);
         }
 
         // Setup post build options
@@ -382,9 +583,9 @@ public abstract class AbstractHttp2ConnectionHandlerBuilder<T extends Http2Conne
         return (B) this;
     }
 
-    private void enforceNonCodecConstraints(String rejectee) {
-        enforceConstraint(rejectee, "server/connection", decoder);
-        enforceConstraint(rejectee, "server/connection", encoder);
+    private void enforceNonCodecConstraints(String rejected) {
+        enforceConstraint(rejected, "server/connection", decoder);
+        enforceConstraint(rejected, "server/connection", encoder);
     }
 
     private static void enforceConstraint(String methodName, String rejectorName, Object value) {

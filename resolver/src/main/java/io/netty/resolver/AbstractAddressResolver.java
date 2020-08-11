@@ -42,7 +42,7 @@ public abstract class AbstractAddressResolver<T extends SocketAddress> implement
      */
     protected AbstractAddressResolver(EventExecutor executor) {
         this.executor = checkNotNull(executor, "executor");
-        matcher = TypeParameterMatcher.find(this, AbstractAddressResolver.class, "T");
+        this.matcher = TypeParameterMatcher.find(this, AbstractAddressResolver.class, "T");
     }
 
     /**
@@ -52,7 +52,7 @@ public abstract class AbstractAddressResolver<T extends SocketAddress> implement
      */
     protected AbstractAddressResolver(EventExecutor executor, Class<? extends T> addressType) {
         this.executor = checkNotNull(executor, "executor");
-        matcher = TypeParameterMatcher.get(addressType);
+        this.matcher = TypeParameterMatcher.get(addressType);
     }
 
     /**

@@ -20,6 +20,7 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.DecoderException;
 import io.netty.handler.codec.LineBasedFrameDecoder;
 import io.netty.util.CharsetUtil;
+import io.netty.util.internal.UnstableApi;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -28,6 +29,7 @@ import java.util.List;
 /**
  * Decoder for SMTP responses.
  */
+@UnstableApi
 public final class SmtpResponseDecoder extends LineBasedFrameDecoder {
 
     private List<CharSequence> details;
@@ -67,7 +69,11 @@ public final class SmtpResponseDecoder extends LineBasedFrameDecoder {
                         details.add(detail);
                     }
                 } else {
-                    details = Collections.singletonList(detail);
+                    if (detail == null) {
+                        details = Collections.emptyList();
+                    } else {
+                        details = Collections.singletonList(detail);
+                    }
                 }
                 return new DefaultSmtpResponse(code, details);
             case '-':

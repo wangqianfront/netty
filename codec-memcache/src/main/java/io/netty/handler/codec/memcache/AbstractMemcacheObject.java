@@ -17,10 +17,13 @@ package io.netty.handler.codec.memcache;
 
 import io.netty.handler.codec.DecoderResult;
 import io.netty.util.AbstractReferenceCounted;
+import io.netty.util.internal.ObjectUtil;
+import io.netty.util.internal.UnstableApi;
 
 /**
  * The default {@link MemcacheObject} implementation.
  */
+@UnstableApi
 public abstract class AbstractMemcacheObject extends AbstractReferenceCounted implements MemcacheObject {
 
     private DecoderResult decoderResult = DecoderResult.SUCCESS;
@@ -36,10 +39,6 @@ public abstract class AbstractMemcacheObject extends AbstractReferenceCounted im
 
     @Override
     public void setDecoderResult(DecoderResult result) {
-        if (result == null) {
-            throw new NullPointerException("DecoderResult should not be null.");
-        }
-
-        decoderResult = result;
+        this.decoderResult = ObjectUtil.checkNotNull(result, "DecoderResult should not be null.");
     }
 }

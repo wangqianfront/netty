@@ -17,6 +17,8 @@ package io.netty.microbench.util;
 
 import io.netty.util.concurrent.DefaultThreadFactory;
 import io.netty.util.internal.SystemPropertyUtil;
+import io.netty.util.internal.logging.InternalLogger;
+import io.netty.util.internal.logging.InternalLoggerFactory;
 
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -34,10 +36,12 @@ public class AbstractMicrobenchmark extends AbstractMicrobenchmarkBase {
     protected static final int DEFAULT_FORKS = 2;
 
     public static final class HarnessExecutor extends ThreadPoolExecutor {
+        private final  InternalLogger logger = InternalLoggerFactory.getInstance(AbstractMicrobenchmark.class);
+
         public HarnessExecutor(int maxThreads, String prefix) {
             super(maxThreads, maxThreads, 0, TimeUnit.MILLISECONDS,
                     new LinkedBlockingQueue<Runnable>(), new DefaultThreadFactory(prefix));
-            System.out.println("Using harness executor");
+            logger.debug("Using harness executor");
         }
     }
 
@@ -54,9 +58,12 @@ public class AbstractMicrobenchmark extends AbstractMicrobenchmarkBase {
     public AbstractMicrobenchmark(boolean disableAssertions, boolean disableHarnessExecutor) {
         final String[] customArgs;
         if (disableHarnessExecutor) {
-            customArgs = new String[]{"-Xms768m", "-Xmx768m", "-XX:MaxDirectMemorySize=768m"};
+            customArgs = new String[]{"-Xms768m", "-Xmx768m", "-XX:MaxDirectMemorySize=768m",
+                    "-XX:BiasedLockingStartupDelay=0"};
         } else {
-            customArgs = new String[]{"-Xms768m", "-Xmx768m", "-XX:MaxDirectMemorySize=768m", "-Djmh.executor=CUSTOM",
+            customArgs = new String[]{"-Xms768m", "-Xmx768m", "-XX:MaxDirectMemorySize=768m",
+                    "-XX:BiasedLockingStartupDelay=0",
+                    "-Djmh.executor=CUSTOM",
                     "-Djmh.executor.class=io.netty.microbench.util.AbstractMicrobenchmark$HarnessExecutor"};
         }
         String[] jvmArgs = new String[BASE_JVM_ARGS.length + customArgs.length];

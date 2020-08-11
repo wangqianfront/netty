@@ -22,7 +22,9 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPromise;
 import io.netty.channel.ChannelPromiseNotifier;
 import io.netty.util.concurrent.EventExecutor;
-import io.netty.util.internal.OneTimeTask;
+import io.netty.util.internal.ObjectUtil;
+import io.netty.util.internal.PlatformDependent;
+import io.netty.util.internal.SuppressJava6Requirement;
 
 import java.util.concurrent.TimeUnit;
 import java.util.zip.CRC32;
@@ -96,9 +98,7 @@ public class JdkZlibEncoder extends ZlibEncoder {
             throw new IllegalArgumentException(
                     "compressionLevel: " + compressionLevel + " (expected: 0-9)");
         }
-        if (wrapper == null) {
-            throw new NullPointerException("wrapper");
-        }
+        ObjectUtil.checkNotNull(wrapper, "wrapper");
         if (wrapper == ZlibWrapper.ZLIB_OR_NONE) {
             throw new IllegalArgumentException(
                     "wrapper '" + ZlibWrapper.ZLIB_OR_NONE + "' is not " +
@@ -142,9 +142,7 @@ public class JdkZlibEncoder extends ZlibEncoder {
             throw new IllegalArgumentException(
                     "compressionLevel: " + compressionLevel + " (expected: 0-9)");
         }
-        if (dictionary == null) {
-            throw new NullPointerException("dictionary");
-        }
+        ObjectUtil.checkNotNull(dictionary, "dictionary");
 
         wrapper = ZlibWrapper.ZLIB;
         deflater = new Deflater(compressionLevel);
@@ -164,7 +162,7 @@ public class JdkZlibEncoder extends ZlibEncoder {
             return finishEncode(ctx, promise);
         } else {
             final ChannelPromise p = ctx.newPromise();
-            executor.execute(new OneTimeTask() {
+            executor.execute(new Runnable() {
                 @Override
                 public void run() {
                     ChannelFuture f = finishEncode(ctx(), p);
@@ -226,8 +224,18 @@ public class JdkZlibEncoder extends ZlibEncoder {
         }
 
         deflater.setInput(inAry, offset, len);
-        while (!deflater.needsInput()) {
+        for (;;) {
             deflate(out);
+            if (deflater.needsInput()) {
+                // Consumed everything
+                break;
+            } else {
+                if (!out.isWritable()) {
+                    // We did not consume everything but the buffer is not writable anymore. Increase the capacity to
+                    // make more room.
+                    out.ensureWritable(out.writerIndex());
+                }
+            }
         }
     }
 
@@ -243,6 +251,8 @@ public class JdkZlibEncoder extends ZlibEncoder {
                 case ZLIB:
                     sizeEstimate += 2; // first two magic bytes
                     break;
+                default:
+                    // no op
             }
         }
         return ctx.alloc().heapBuffer(sizeEstimate);
@@ -260,7 +270,7 @@ public class JdkZlibEncoder extends ZlibEncoder {
 
         if (!f.isDone()) {
             // Ensure the channel is closed even if the write operation completes in time.
-            ctx.executor().schedule(new OneTimeTask() {
+            ctx.executor().schedule(new Runnable() {
                 @Override
                 public void run() {
                     ctx.close(promise);
@@ -309,12 +319,26 @@ public class JdkZlibEncoder extends ZlibEncoder {
         return ctx.writeAndFlush(footer, promise);
     }
 
+    @SuppressJava6Requirement(reason = "Usage guarded by java version check")
     private void deflate(ByteBuf out) {
+        if (PlatformDependent.javaVersion() < 7) {
+            deflateJdk6(out);
+        }
         int numBytes;
         do {
             int writerIndex = out.writerIndex();
             numBytes = deflater.deflate(
                     out.array(), out.arrayOffset() + writerIndex, out.writableBytes(), Deflater.SYNC_FLUSH);
+            out.writerIndex(writerIndex + numBytes);
+        } while (numBytes > 0);
+    }
+
+    private void deflateJdk6(ByteBuf out) {
+        int numBytes;
+        do {
+            int writerIndex = out.writerIndex();
+            numBytes = deflater.deflate(
+                    out.array(), out.arrayOffset() + writerIndex, out.writableBytes());
             out.writerIndex(writerIndex + numBytes);
         } while (numBytes > 0);
     }

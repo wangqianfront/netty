@@ -17,18 +17,13 @@ package io.netty.handler.codec.http2;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufHolder;
+import io.netty.util.internal.UnstableApi;
 
 /**
  * HTTP/2 DATA frame.
  */
+@UnstableApi
 public interface Http2DataFrame extends Http2StreamFrame, ByteBufHolder {
-    @Override
-    Http2DataFrame setStream(Object stream);
-
-    /**
-     * {@code true} if this frame is the last one in this direction of the stream.
-     */
-    boolean isEndStream();
 
     /**
      * Frame padding to use. Will be non-negative and less than 256.
@@ -41,11 +36,28 @@ public interface Http2DataFrame extends Http2StreamFrame, ByteBufHolder {
     @Override
     ByteBuf content();
 
+    /**
+     * Returns the number of bytes that are flow-controlled initially, so even if the {@link #content()} is consumed
+     * this will not change.
+     */
+    int initialFlowControlledBytes();
+
+    /**
+     * Returns {@code true} if the END_STREAM flag ist set.
+     */
+    boolean isEndStream();
+
     @Override
     Http2DataFrame copy();
 
     @Override
     Http2DataFrame duplicate();
+
+    @Override
+    Http2DataFrame retainedDuplicate();
+
+    @Override
+    Http2DataFrame replace(ByteBuf content);
 
     @Override
     Http2DataFrame retain();

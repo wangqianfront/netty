@@ -30,8 +30,11 @@ import io.netty.channel.nio.AbstractNioMessageChannel;
 import io.netty.channel.socket.DatagramChannelConfig;
 import io.netty.channel.socket.DatagramPacket;
 import io.netty.channel.socket.InternetProtocolFamily;
+import io.netty.util.internal.ObjectUtil;
+import io.netty.util.internal.SocketUtils;
 import io.netty.util.internal.PlatformDependent;
 import io.netty.util.internal.StringUtil;
+import io.netty.util.internal.SuppressJava6Requirement;
 
 import java.io.IOException;
 import java.net.InetAddress;
@@ -87,6 +90,7 @@ public final class NioDatagramChannel
         }
     }
 
+    @SuppressJava6Requirement(reason = "Usage guarded by java version check")
     private static DatagramChannel newSocket(SelectorProvider provider, InternetProtocolFamily ipFamily) {
         if (ipFamily == null) {
             return newSocket(provider);
@@ -188,14 +192,22 @@ public final class NioDatagramChannel
 
     @Override
     protected void doBind(SocketAddress localAddress) throws Exception {
-        javaChannel().socket().bind(localAddress);
+        doBind0(localAddress);
+    }
+
+    private void doBind0(SocketAddress localAddress) throws Exception {
+        if (PlatformDependent.javaVersion() >= 7) {
+            SocketUtils.bind(javaChannel(), localAddress);
+        } else {
+            javaChannel().socket().bind(localAddress);
+        }
     }
 
     @Override
     protected boolean doConnect(SocketAddress remoteAddress,
             SocketAddress localAddress) throws Exception {
         if (localAddress != null) {
-            javaChannel().socket().bind(localAddress);
+            doBind0(localAddress);
         }
 
         boolean success = false;
@@ -276,7 +288,8 @@ public final class NioDatagramChannel
             return true;
         }
 
-        final ByteBuffer nioData = data.internalNioBuffer(data.readerIndex(), dataLen);
+        final ByteBuffer nioData = data.nioBufferCount() == 1 ? data.internalNioBuffer(data.readerIndex(), dataLen)
+                                                              : data.nioBuffer(data.readerIndex(), dataLen);
         final int writtenBytes;
         if (remoteAddress != null) {
             writtenBytes = javaChannel().send(nioData, remoteAddress);
@@ -384,6 +397,7 @@ public final class NioDatagramChannel
         return joinGroup(multicastAddress, networkInterface, source, newPromise());
     }
 
+    @SuppressJava6Requirement(reason = "Usage guarded by java version check")
     @Override
     public ChannelFuture joinGroup(
             InetAddress multicastAddress, NetworkInterface networkInterface,
@@ -391,13 +405,8 @@ public final class NioDatagramChannel
 
         checkJavaVersion();
 
-        if (multicastAddress == null) {
-            throw new NullPointerException("multicastAddress");
-        }
-
-        if (networkInterface == null) {
-            throw new NullPointerException("networkInterface");
-        }
+        ObjectUtil.checkNotNull(multicastAddress, "multicastAddress");
+        ObjectUtil.checkNotNull(networkInterface, "networkInterface");
 
         try {
             MembershipKey key;
@@ -464,18 +473,15 @@ public final class NioDatagramChannel
         return leaveGroup(multicastAddress, networkInterface, source, newPromise());
     }
 
+    @SuppressJava6Requirement(reason = "Usage guarded by java version check")
     @Override
     public ChannelFuture leaveGroup(
             InetAddress multicastAddress, NetworkInterface networkInterface, InetAddress source,
             ChannelPromise promise) {
         checkJavaVersion();
 
-        if (multicastAddress == null) {
-            throw new NullPointerException("multicastAddress");
-        }
-        if (networkInterface == null) {
-            throw new NullPointerException("networkInterface");
-        }
+        ObjectUtil.checkNotNull(multicastAddress, "multicastAddress");
+        ObjectUtil.checkNotNull(networkInterface, "networkInterface");
 
         synchronized (this) {
             if (memberships != null) {
@@ -517,22 +523,17 @@ public final class NioDatagramChannel
     /**
      * Block the given sourceToBlock address for the given multicastAddress on the given networkInterface
      */
+    @SuppressJava6Requirement(reason = "Usage guarded by java version check")
     @Override
     public ChannelFuture block(
             InetAddress multicastAddress, NetworkInterface networkInterface,
             InetAddress sourceToBlock, ChannelPromise promise) {
         checkJavaVersion();
 
-        if (multicastAddress == null) {
-            throw new NullPointerException("multicastAddress");
-        }
-        if (sourceToBlock == null) {
-            throw new NullPointerException("sourceToBlock");
-        }
+        ObjectUtil.checkNotNull(multicastAddress, "multicastAddress");
+        ObjectUtil.checkNotNull(sourceToBlock, "sourceToBlock");
+        ObjectUtil.checkNotNull(networkInterface, "networkInterface");
 
-        if (networkInterface == null) {
-            throw new NullPointerException("networkInterface");
-        }
         synchronized (this) {
             if (memberships != null) {
                 List<MembershipKey> keys = memberships.get(multicastAddress);
@@ -586,5 +587,15 @@ public final class NioDatagramChannel
 
     void clearReadPending0() {
         clearReadPending();
+    }
+
+    @Override
+    protected boolean closeOnReadError(Throwable cause) {
+        // We do not want to close on SocketException when using DatagramChannel as we usually can continue receiving.
+        // See https://github.com/netty/netty/issues/5893
+        if (cause instanceof SocketException) {
+            return false;
+        }
+        return super.closeOnReadError(cause);
     }
 }

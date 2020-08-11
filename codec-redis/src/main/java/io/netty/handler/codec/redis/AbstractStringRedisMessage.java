@@ -16,10 +16,13 @@
 package io.netty.handler.codec.redis;
 
 import io.netty.util.internal.ObjectUtil;
+import io.netty.util.internal.StringUtil;
+import io.netty.util.internal.UnstableApi;
 
 /**
  * Abstract class for Simple Strings or Errors.
  */
+@UnstableApi
 public abstract class AbstractStringRedisMessage implements RedisMessage {
 
     private final String content;
@@ -36,4 +39,14 @@ public abstract class AbstractStringRedisMessage implements RedisMessage {
     public final String content() {
         return content;
     }
+
+    @Override
+    public String toString() {
+        return new StringBuilder(StringUtil.simpleClassName(this))
+                .append('[')
+                .append("content=")
+                .append(content)
+                .append(']').toString();
+    }
+
 }

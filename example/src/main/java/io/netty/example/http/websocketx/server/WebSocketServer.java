@@ -27,12 +27,12 @@ import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.SelfSignedCertificate;
 
 /**
- * A HTTP server which serves Web Socket requests at:
+ * An HTTP server which serves Web Socket requests at:
  *
  * http://localhost:8080/websocket
  *
- * Open your browser at http://localhost:8080/, then the demo page will be loaded and a Web Socket connection will be
- * made automatically.
+ * Open your browser at <a href="http://localhost:8080/">http://localhost:8080/</a>, then the demo page will be loaded
+ * and a Web Socket connection will be made automatically.
  *
  * This server illustrates support for the different web socket specification versions and will work with:
  *

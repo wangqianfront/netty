@@ -15,11 +15,9 @@
  */
 package io.netty.handler.codec.http.cookie;
 
+import java.util.List;
 import org.junit.Test;
 
-import io.netty.handler.codec.http.HttpHeaderDateFormat;
-
-import java.util.Date;
 import java.util.Iterator;
 import java.util.Set;
 
@@ -29,9 +27,6 @@ public class ServerCookieDecoderTest {
     @Test
     public void testDecodingSingleCookie() {
         String cookieString = "myCookie=myValue";
-        cookieString = cookieString.replace("XXX",
-                HttpHeaderDateFormat.get().format(new Date(System.currentTimeMillis() + 50000)));
-
         Set<Cookie> cookies = ServerCookieDecoder.STRICT.decode(cookieString);
         assertEquals(1, cookies.size());
         Cookie cookie = cookies.iterator().next();
@@ -60,6 +55,26 @@ public class ServerCookieDecoderTest {
     }
 
     @Test
+    public void testDecodingAllMultipleCookies() {
+        String c1 = "myCookie=myValue;";
+        String c2 = "myCookie=myValue2;";
+        String c3 = "myCookie=myValue3;";
+
+        List<Cookie> cookies = ServerCookieDecoder.STRICT.decodeAll(c1 + c2 + c3);
+        assertEquals(3, cookies.size());
+        Iterator<Cookie> it = cookies.iterator();
+        Cookie cookie = it.next();
+        assertNotNull(cookie);
+        assertEquals("myValue", cookie.value());
+        cookie = it.next();
+        assertNotNull(cookie);
+        assertEquals("myValue2", cookie.value());
+        cookie = it.next();
+        assertNotNull(cookie);
+        assertEquals("myValue3", cookie.value());
+    }
+
+    @Test
     public void testDecodingGoogleAnalyticsCookie() {
         String source =
             "ARPT=LWUKQPSWRTUN04CKKJI; " +
@@ -71,6 +86,10 @@ public class ServerCookieDecoderTest {
         Set<Cookie> cookies = ServerCookieDecoder.STRICT.decode(source);
         Iterator<Cookie> it = cookies.iterator();
         Cookie c;
+
+        c = it.next();
+        assertEquals("ARPT", c.name());
+        assertEquals("LWUKQPSWRTUN04CKKJI", c.value());
 
         c = it.next();
         assertEquals("__utma", c.name());
@@ -89,10 +108,6 @@ public class ServerCookieDecoderTest {
         assertEquals("48461872.1258140131.1.1.utmcsr=overstock.com|" +
                 "utmccn=(referral)|utmcmd=referral|utmcct=/Home-Garden/Furniture/Clearance/clearance/32/dept.html",
                 c.value());
-
-        c = it.next();
-        assertEquals("ARPT", c.name());
-        assertEquals("LWUKQPSWRTUN04CKKJI", c.value());
 
         c = it.next();
         assertEquals("kw-2E343B92-B097-442c-BFA5-BE371E0325A2", c.name());
@@ -181,5 +196,22 @@ public class ServerCookieDecoderTest {
     public void testRejectCookieValueWithSemicolon() {
         Set<Cookie> cookies = ServerCookieDecoder.STRICT.decode("name=\"foo;bar\";");
         assertTrue(cookies.isEmpty());
+    }
+
+    @Test
+    public void testCaseSensitiveNames() {
+        Set<Cookie> cookies = ServerCookieDecoder.STRICT.decode("session_id=a; Session_id=b;");
+        Iterator<Cookie> it = cookies.iterator();
+        Cookie c;
+
+        c = it.next();
+        assertEquals("Session_id", c.name());
+        assertEquals("b", c.value());
+
+        c = it.next();
+        assertEquals("session_id", c.name());
+        assertEquals("a", c.value());
+
+        assertFalse(it.hasNext());
     }
 }

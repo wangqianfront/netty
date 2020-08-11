@@ -17,10 +17,13 @@ package io.netty.handler.codec.memcache.binary;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
+import io.netty.util.internal.ObjectUtil;
+import io.netty.util.internal.UnstableApi;
 
 /**
  * The default implementation of a {@link FullBinaryMemcacheResponse}.
  */
+@UnstableApi
 public class DefaultFullBinaryMemcacheResponse extends DefaultBinaryMemcacheResponse
     implements FullBinaryMemcacheResponse {
 
@@ -46,11 +49,7 @@ public class DefaultFullBinaryMemcacheResponse extends DefaultBinaryMemcacheResp
     public DefaultFullBinaryMemcacheResponse(ByteBuf key, ByteBuf extras,
         ByteBuf content) {
         super(key, extras);
-        if (content == null) {
-            throw new NullPointerException("Supplied content is null.");
-        }
-
-        this.content = content;
+        this.content = ObjectUtil.checkNotNull(content, "content");
         setTotalBodyLength(keyLength() + extrasLength() + content.readableBytes());
     }
 
@@ -100,7 +99,7 @@ public class DefaultFullBinaryMemcacheResponse extends DefaultBinaryMemcacheResp
         if (extras != null) {
             extras = extras.copy();
         }
-        return new DefaultFullBinaryMemcacheResponse(key, extras, content().copy());
+        return newInstance(key, extras, content().copy());
     }
 
     @Override
@@ -113,6 +112,30 @@ public class DefaultFullBinaryMemcacheResponse extends DefaultBinaryMemcacheResp
         if (extras != null) {
             extras = extras.duplicate();
         }
-        return new DefaultFullBinaryMemcacheResponse(key, extras, content().duplicate());
+        return newInstance(key, extras, content().duplicate());
+    }
+
+    @Override
+    public FullBinaryMemcacheResponse retainedDuplicate() {
+        return replace(content().retainedDuplicate());
+    }
+
+    @Override
+    public FullBinaryMemcacheResponse replace(ByteBuf content) {
+        ByteBuf key = key();
+        if (key != null) {
+            key = key.retainedDuplicate();
+        }
+        ByteBuf extras = extras();
+        if (extras != null) {
+            extras = extras.retainedDuplicate();
+        }
+        return newInstance(key, extras, content);
+    }
+
+    private FullBinaryMemcacheResponse newInstance(ByteBuf key, ByteBuf extras, ByteBuf content) {
+        DefaultFullBinaryMemcacheResponse newInstance = new DefaultFullBinaryMemcacheResponse(key, extras, content);
+        copyMeta(newInstance);
+        return newInstance;
     }
 }

@@ -21,6 +21,7 @@ import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.HttpHeaderNames;
 import io.netty.handler.codec.http.HttpHeaderValues;
 import io.netty.handler.codec.http.HttpRequest;
+import io.netty.util.internal.ObjectUtil;
 import io.netty.util.internal.StringUtil;
 
 import java.nio.charset.Charset;
@@ -83,15 +84,10 @@ public class HttpPostRequestDecoder implements InterfaceHttpPostRequestDecoder {
      *             errors
      */
     public HttpPostRequestDecoder(HttpDataFactory factory, HttpRequest request, Charset charset) {
-        if (factory == null) {
-            throw new NullPointerException("factory");
-        }
-        if (request == null) {
-            throw new NullPointerException("request");
-        }
-        if (charset == null) {
-            throw new NullPointerException("charset");
-        }
+        ObjectUtil.checkNotNull(factory, "factory");
+        ObjectUtil.checkNotNull(request, "request");
+        ObjectUtil.checkNotNull(charset, "charset");
+
         // Fill default values
         if (isMultipart(request)) {
             decoder = new HttpPostMultipartRequestDecoder(factory, request, charset);
@@ -140,11 +136,11 @@ public class HttpPostRequestDecoder implements InterfaceHttpPostRequestDecoder {
      * @return True if the request is a Multipart request
      */
     public static boolean isMultipart(HttpRequest request) {
-        if (request.headers().contains(HttpHeaderNames.CONTENT_TYPE)) {
-            return getMultipartDataBoundary(request.headers().get(HttpHeaderNames.CONTENT_TYPE)) != null;
-        } else {
-            return false;
+        String mimeType = request.headers().get(HttpHeaderNames.CONTENT_TYPE);
+        if (mimeType != null && mimeType.startsWith(HttpHeaderValues.MULTIPART_FORM_DATA.toString())) {
+            return getMultipartDataBoundary(mimeType) != null;
         }
+        return false;
     }
 
     /**
@@ -155,16 +151,15 @@ public class HttpPostRequestDecoder implements InterfaceHttpPostRequestDecoder {
     protected static String[] getMultipartDataBoundary(String contentType) {
         // Check if Post using "multipart/form-data; boundary=--89421926422648 [; charset=xxx]"
         String[] headerContentType = splitHeaderContentType(contentType);
-        if (headerContentType[0].toLowerCase().startsWith(
-                HttpHeaderValues.MULTIPART_FORM_DATA.toString())) {
+        final String multiPartHeader = HttpHeaderValues.MULTIPART_FORM_DATA.toString();
+        if (headerContentType[0].regionMatches(true, 0, multiPartHeader, 0 , multiPartHeader.length())) {
             int mrank;
             int crank;
-            if (headerContentType[1].toLowerCase().startsWith(
-                    HttpHeaderValues.BOUNDARY.toString())) {
+            final String boundaryHeader = HttpHeaderValues.BOUNDARY.toString();
+            if (headerContentType[1].regionMatches(true, 0, boundaryHeader, 0, boundaryHeader.length())) {
                 mrank = 1;
                 crank = 2;
-            } else if (headerContentType[2].toLowerCase().startsWith(
-                    HttpHeaderValues.BOUNDARY.toString())) {
+            } else if (headerContentType[2].regionMatches(true, 0, boundaryHeader, 0, boundaryHeader.length())) {
                 mrank = 2;
                 crank = 1;
             } else {
@@ -181,8 +176,8 @@ public class HttpPostRequestDecoder implements InterfaceHttpPostRequestDecoder {
                     boundary = bound.substring(1, index);
                 }
             }
-            if (headerContentType[crank].toLowerCase().startsWith(
-                    HttpHeaderValues.CHARSET.toString())) {
+            final String charsetHeader = HttpHeaderValues.CHARSET.toString();
+            if (headerContentType[crank].regionMatches(true, 0, charsetHeader, 0, charsetHeader.length())) {
                 String charset = StringUtil.substringAfter(headerContentType[crank], '=');
                 if (charset != null) {
                     return new String[] {"--" + boundary, charset};

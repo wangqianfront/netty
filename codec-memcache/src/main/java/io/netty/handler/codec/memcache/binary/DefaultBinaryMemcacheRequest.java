@@ -16,10 +16,12 @@
 package io.netty.handler.codec.memcache.binary;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.util.internal.UnstableApi;
 
 /**
  * The default implementation of the {@link BinaryMemcacheRequest}.
  */
+@UnstableApi
 public class DefaultBinaryMemcacheRequest extends AbstractBinaryMemcacheMessage implements BinaryMemcacheRequest {
 
     /**
@@ -89,5 +91,15 @@ public class DefaultBinaryMemcacheRequest extends AbstractBinaryMemcacheMessage 
     public BinaryMemcacheRequest touch(Object hint) {
         super.touch(hint);
         return this;
+    }
+
+    /**
+     * Copies special metadata hold by this instance to the provided instance
+     *
+     * @param dst The instance where to copy the metadata of this instance to
+     */
+    void copyMeta(DefaultBinaryMemcacheRequest dst) {
+        super.copyMeta(dst);
+        dst.reserved = reserved;
     }
 }

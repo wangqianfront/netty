@@ -138,7 +138,11 @@ public class WebSocketRequestBuilder {
             headers.set(HttpHeaderNames.SEC_WEBSOCKET_KEY, key);
         }
         if (origin != null) {
-            headers.set(HttpHeaderNames.SEC_WEBSOCKET_ORIGIN, origin);
+            if (version == WebSocketVersion.V13 || version == WebSocketVersion.V00) {
+                headers.set(HttpHeaderNames.ORIGIN, origin);
+            } else {
+                headers.set(HttpHeaderNames.SEC_WEBSOCKET_ORIGIN, origin);
+            }
         }
         if (version != null) {
             headers.set(HttpHeaderNames.SEC_WEBSOCKET_VERSION, version.toHttpHeaderValue());
@@ -146,7 +150,7 @@ public class WebSocketRequestBuilder {
         return req;
     }
 
-    public static HttpRequest sucessful() {
+    public static HttpRequest successful() {
         return new WebSocketRequestBuilder().httpVersion(HTTP_1_1)
                 .method(HttpMethod.GET)
                 .uri("/test")

@@ -20,6 +20,7 @@ import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.MessageToMessageEncoder;
+import io.netty.util.internal.UnstableApi;
 
 import java.util.Iterator;
 import java.util.List;
@@ -28,12 +29,12 @@ import java.util.RandomAccess;
 /**
  * Encoder for SMTP requests.
  */
+@UnstableApi
 public final class SmtpRequestEncoder extends MessageToMessageEncoder<Object> {
-    private static final byte[] CRLF = {'\r', '\n'};
-    private static final byte[] DOT_CRLF = {'.', '\r', '\n'};
+    private static final int CRLF_SHORT = ('\r' << 8) | '\n';
     private static final byte SP = ' ';
     private static final ByteBuf DOT_CRLF_BUFFER = Unpooled.unreleasableBuffer(
-            Unpooled.directBuffer(3).writeBytes(DOT_CRLF));
+            Unpooled.directBuffer(3).writeByte('.').writeByte('\r').writeByte('\n'));
 
     private boolean contentExpected;
 
@@ -45,16 +46,21 @@ public final class SmtpRequestEncoder extends MessageToMessageEncoder<Object> {
     @Override
     protected void encode(ChannelHandlerContext ctx, Object msg, List<Object> out) throws Exception {
         if (msg instanceof SmtpRequest) {
+            final SmtpRequest req = (SmtpRequest) msg;
             if (contentExpected) {
-                throw new IllegalStateException("SmtpContent expected");
+                if (req.command().equals(SmtpCommand.RSET)) {
+                    contentExpected = false;
+                } else {
+                    throw new IllegalStateException("SmtpContent expected");
+                }
             }
             boolean release = true;
             final ByteBuf buffer = ctx.alloc().buffer();
             try {
-                final SmtpRequest req = (SmtpRequest) msg;
                 req.command().encode(buffer);
-                writeParameters(req.parameters(), buffer);
-                buffer.writeBytes(CRLF);
+                boolean notEmpty = req.command() != SmtpCommand.EMPTY;
+                writeParameters(req.parameters(), buffer, notEmpty);
+                ByteBufUtil.writeShortBE(buffer, CRLF_SHORT);
                 out.add(buffer);
                 release = false;
                 if (req.command().isContentExpected()) {
@@ -74,17 +80,19 @@ public final class SmtpRequestEncoder extends MessageToMessageEncoder<Object> {
             final ByteBuf content = ((SmtpContent) msg).content();
             out.add(content.retain());
             if (msg instanceof LastSmtpContent) {
-                out.add(DOT_CRLF_BUFFER.duplicate().retain());
+                out.add(DOT_CRLF_BUFFER.retainedDuplicate());
                 contentExpected = false;
             }
         }
     }
 
-    private static void writeParameters(List<CharSequence> parameters, ByteBuf out) {
+    private static void writeParameters(List<CharSequence> parameters, ByteBuf out, boolean commandNotEmpty) {
         if (parameters.isEmpty()) {
             return;
         }
-        out.writeByte(SP);
+        if (commandNotEmpty) {
+            out.writeByte(SP);
+        }
         if (parameters instanceof RandomAccess) {
             final int sizeMinusOne = parameters.size() - 1;
             for (int i = 0; i < sizeMinusOne; i++) {

@@ -25,7 +25,6 @@ import java.net.InetSocketAddress;
  * A skeletal {@link NameResolver} implementation that resolves {@link InetAddress}.
  */
 public abstract class InetNameResolver extends SimpleNameResolver<InetAddress> {
-
     private volatile AddressResolver<InetSocketAddress> addressResolver;
 
     /**

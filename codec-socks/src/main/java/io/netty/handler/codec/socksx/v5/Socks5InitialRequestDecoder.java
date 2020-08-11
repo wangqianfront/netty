@@ -56,9 +56,6 @@ public class Socks5InitialRequestDecoder extends ReplayingDecoder<State> {
                 }
 
                 final int authMethodCnt = in.readUnsignedByte();
-                if (actualReadableBytes() < authMethodCnt) {
-                    break;
-                }
 
                 final Socks5AuthMethod[] authMethods = new Socks5AuthMethod[authMethodCnt];
                 for (int i = 0; i < authMethodCnt; i++) {
@@ -71,7 +68,7 @@ public class Socks5InitialRequestDecoder extends ReplayingDecoder<State> {
             case SUCCESS: {
                 int readableBytes = actualReadableBytes();
                 if (readableBytes > 0) {
-                    out.add(in.readSlice(readableBytes).retain());
+                    out.add(in.readRetainedSlice(readableBytes));
                 }
                 break;
             }
@@ -85,7 +82,7 @@ public class Socks5InitialRequestDecoder extends ReplayingDecoder<State> {
         }
     }
 
-    private void fail(List<Object> out, Throwable cause) {
+    private void fail(List<Object> out, Exception cause) {
         if (!(cause instanceof DecoderException)) {
             cause = new DecoderException(cause);
         }

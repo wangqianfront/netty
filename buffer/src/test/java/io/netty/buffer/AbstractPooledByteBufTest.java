@@ -17,58 +17,112 @@ package io.netty.buffer;
 
 import org.junit.Test;
 
-import static org.junit.Assert.*;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.greaterThanOrEqualTo;
+import static org.hamcrest.Matchers.is;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 public abstract class AbstractPooledByteBufTest extends AbstractByteBufTest {
 
-    protected abstract ByteBuf alloc(int length);
+    protected abstract ByteBuf alloc(int length, int maxCapacity);
 
     @Override
-    protected ByteBuf newBuffer(int length) {
-        ByteBuf buffer = alloc(length);
+    protected ByteBuf newBuffer(int length, int maxCapacity) {
+        ByteBuf buffer = alloc(length, maxCapacity);
+
+        // Testing if the writerIndex and readerIndex are correct when allocate and also after we reset the mark.
+        assertEquals(0, buffer.writerIndex());
+        assertEquals(0, buffer.readerIndex());
+        buffer.resetReaderIndex();
+        buffer.resetWriterIndex();
         assertEquals(0, buffer.writerIndex());
         assertEquals(0, buffer.readerIndex());
         return buffer;
     }
 
     @Test
-    public void testDiscardMarks() {
-        testDiscardMarks(4);
+    public void ensureWritableWithEnoughSpaceShouldNotThrow() {
+        ByteBuf buf = newBuffer(1, 10);
+        buf.ensureWritable(3);
+        assertThat(buf.writableBytes(), is(greaterThanOrEqualTo(3)));
+        buf.release();
+    }
+
+    @Test(expected = IndexOutOfBoundsException.class)
+    public void ensureWritableWithNotEnoughSpaceShouldThrow() {
+        ByteBuf buf = newBuffer(1, 10);
+        try {
+            buf.ensureWritable(11);
+            fail();
+        } finally {
+            buf.release();
+        }
+    }
+
+    @Override
+    @Test
+    public void testMaxFastWritableBytes() {
+        ByteBuf buffer = newBuffer(150, 500).writerIndex(100);
+        assertEquals(50, buffer.writableBytes());
+        assertEquals(150, buffer.capacity());
+        assertEquals(500, buffer.maxCapacity());
+        assertEquals(400, buffer.maxWritableBytes());
+
+        int chunkSize = pooledByteBuf(buffer).maxLength;
+        assertTrue(chunkSize >= 150);
+        int remainingInAlloc = Math.min(chunkSize - 100, 400);
+        assertEquals(remainingInAlloc, buffer.maxFastWritableBytes());
+
+        // write up to max, chunk alloc should not change (same handle)
+        long handleBefore = pooledByteBuf(buffer).handle;
+        buffer.writeBytes(new byte[remainingInAlloc]);
+        assertEquals(handleBefore, pooledByteBuf(buffer).handle);
+
+        assertEquals(0, buffer.maxFastWritableBytes());
+        // writing one more should trigger a reallocation (new handle)
+        buffer.writeByte(7);
+        assertNotEquals(handleBefore, pooledByteBuf(buffer).handle);
+
+        // should not exceed maxCapacity even if chunk alloc does
+        buffer.capacity(500);
+        assertEquals(500 - buffer.writerIndex(), buffer.maxFastWritableBytes());
+        buffer.release();
+    }
+
+    private static PooledByteBuf<?> pooledByteBuf(ByteBuf buffer) {
+        // might need to unwrap if swapped (LE) and/or leak-aware-wrapped
+        while (!(buffer instanceof PooledByteBuf)) {
+            buffer = buffer.unwrap();
+        }
+        return (PooledByteBuf<?>) buffer;
     }
 
     @Test
-    public void testDiscardMarksUnpooled() {
-        testDiscardMarks(32 * 1024 * 1024);
+    public void testEnsureWritableDoesntGrowTooMuch() {
+        ByteBuf buffer = newBuffer(150, 500).writerIndex(100);
+
+        assertEquals(50, buffer.writableBytes());
+        int fastWritable = buffer.maxFastWritableBytes();
+        assertTrue(fastWritable > 50);
+
+        long handleBefore = pooledByteBuf(buffer).handle;
+
+        // capacity expansion should not cause reallocation
+        // (should grow precisely the specified amount)
+        buffer.ensureWritable(fastWritable);
+        assertEquals(handleBefore, pooledByteBuf(buffer).handle);
+        assertEquals(100 + fastWritable, buffer.capacity());
+        assertEquals(buffer.writableBytes(), buffer.maxFastWritableBytes());
+        buffer.release();
     }
 
-    private void testDiscardMarks(int capacity) {
-        ByteBuf buf = newBuffer(capacity);
-        buf.writeShort(1);
-
-        buf.skipBytes(1);
-
-        buf.markReaderIndex();
-        buf.markWriterIndex();
-        assertTrue(buf.release());
-
-        ByteBuf buf2 = newBuffer(capacity);
-
-        assertEquals(unwrapIfNeeded(buf), unwrapIfNeeded(buf2));
-
-        buf2.writeShort(1);
-
-        buf2.resetReaderIndex();
-        buf2.resetWriterIndex();
-
-        assertEquals(0, buf2.readerIndex());
-        assertEquals(0, buf2.writerIndex());
-        assertTrue(buf2.release());
-    }
-
-    private static ByteBuf unwrapIfNeeded(ByteBuf buf) {
-        if (buf instanceof AdvancedLeakAwareByteBuf || buf instanceof SimpleLeakAwareByteBuf) {
-            return buf.unwrap();
-        }
-        return buf;
+    @Test
+    public void testIsContiguous() {
+        ByteBuf buf = newBuffer(4);
+        assertTrue(buf.isContiguous());
+        buf.release();
     }
 }

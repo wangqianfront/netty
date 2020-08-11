@@ -44,14 +44,19 @@ import io.netty.util.CharsetUtil;
 
 import java.util.concurrent.TimeUnit;
 
+import static io.netty.buffer.Unpooled.wrappedBuffer;
 import static io.netty.handler.codec.http.HttpMethod.GET;
 import static io.netty.handler.codec.http.HttpMethod.POST;
 import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
 
 /**
- * An HTTP2 client that allows you to send HTTP2 frames to a server. Inbound and outbound frames are
- * logged. When run from the command-line, sends a single HEADERS frame to the server and gets back
+ * An HTTP2 client that allows you to send HTTP2 frames to a server using HTTP1-style approaches
+ * (via {@link io.netty.handler.codec.http2.InboundHttp2ToHttpAdapter}). Inbound and outbound
+ * frames are logged.
+ * When run from the command-line, sends a single HEADERS frame to the server and gets back
  * a "Hello World" response.
+ * See the ./http2/helloworld/frame/client/ example for a HTTP2 client example which does not use
+ * HTTP1-style objects and patterns.
  */
 public final class Http2Client {
 
@@ -113,25 +118,25 @@ public final class Http2Client {
             System.err.println("Sending request(s)...");
             if (URL != null) {
                 // Create a simple GET request.
-                FullHttpRequest request = new DefaultFullHttpRequest(HTTP_1_1, GET, URL);
+                FullHttpRequest request = new DefaultFullHttpRequest(HTTP_1_1, GET, URL, Unpooled.EMPTY_BUFFER);
                 request.headers().add(HttpHeaderNames.HOST, hostName);
                 request.headers().add(HttpConversionUtil.ExtensionHeaderNames.SCHEME.text(), scheme.name());
                 request.headers().add(HttpHeaderNames.ACCEPT_ENCODING, HttpHeaderValues.GZIP);
                 request.headers().add(HttpHeaderNames.ACCEPT_ENCODING, HttpHeaderValues.DEFLATE);
-                responseHandler.put(streamId, channel.writeAndFlush(request), channel.newPromise());
+                responseHandler.put(streamId, channel.write(request), channel.newPromise());
                 streamId += 2;
             }
             if (URL2 != null) {
                 // Create a simple POST request with a body.
                 FullHttpRequest request = new DefaultFullHttpRequest(HTTP_1_1, POST, URL2,
-                                Unpooled.copiedBuffer(URL2DATA.getBytes(CharsetUtil.UTF_8)));
+                        wrappedBuffer(URL2DATA.getBytes(CharsetUtil.UTF_8)));
                 request.headers().add(HttpHeaderNames.HOST, hostName);
                 request.headers().add(HttpConversionUtil.ExtensionHeaderNames.SCHEME.text(), scheme.name());
                 request.headers().add(HttpHeaderNames.ACCEPT_ENCODING, HttpHeaderValues.GZIP);
                 request.headers().add(HttpHeaderNames.ACCEPT_ENCODING, HttpHeaderValues.DEFLATE);
-                responseHandler.put(streamId, channel.writeAndFlush(request), channel.newPromise());
-                streamId += 2;
+                responseHandler.put(streamId, channel.write(request), channel.newPromise());
             }
+            channel.flush();
             responseHandler.awaitResponses(5, TimeUnit.SECONDS);
             System.out.println("Finished HTTP/2 request(s)");
 

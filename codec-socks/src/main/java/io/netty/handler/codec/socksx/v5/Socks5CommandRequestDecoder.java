@@ -23,6 +23,7 @@ import io.netty.handler.codec.DecoderResult;
 import io.netty.handler.codec.ReplayingDecoder;
 import io.netty.handler.codec.socksx.SocksVersion;
 import io.netty.handler.codec.socksx.v5.Socks5CommandRequestDecoder.State;
+import io.netty.util.internal.ObjectUtil;
 
 import java.util.List;
 
@@ -48,11 +49,7 @@ public class Socks5CommandRequestDecoder extends ReplayingDecoder<State> {
 
     public Socks5CommandRequestDecoder(Socks5AddressDecoder addressDecoder) {
         super(State.INIT);
-        if (addressDecoder == null) {
-            throw new NullPointerException("addressDecoder");
-        }
-
-        this.addressDecoder = addressDecoder;
+        this.addressDecoder = ObjectUtil.checkNotNull(addressDecoder, "addressDecoder");
     }
 
     @Override
@@ -78,7 +75,7 @@ public class Socks5CommandRequestDecoder extends ReplayingDecoder<State> {
             case SUCCESS: {
                 int readableBytes = actualReadableBytes();
                 if (readableBytes > 0) {
-                    out.add(in.readSlice(readableBytes).retain());
+                    out.add(in.readRetainedSlice(readableBytes));
                 }
                 break;
             }
@@ -92,7 +89,7 @@ public class Socks5CommandRequestDecoder extends ReplayingDecoder<State> {
         }
     }
 
-    private void fail(List<Object> out, Throwable cause) {
+    private void fail(List<Object> out, Exception cause) {
         if (!(cause instanceof DecoderException)) {
             cause = new DecoderException(cause);
         }

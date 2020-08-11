@@ -15,6 +15,9 @@
  */
 package io.netty.buffer;
 
+import io.netty.util.CharsetUtil;
+import io.netty.util.internal.ObjectUtil;
+
 import java.io.DataOutput;
 import java.io.DataOutputStream;
 import java.io.IOException;
@@ -43,10 +46,7 @@ public class ByteBufOutputStream extends OutputStream implements DataOutput {
      * Creates a new stream which writes data to the specified {@code buffer}.
      */
     public ByteBufOutputStream(ByteBuf buffer) {
-        if (buffer == null) {
-            throw new NullPointerException("buffer");
-        }
-        this.buffer = buffer;
+        this.buffer = ObjectUtil.checkNotNull(buffer, "buffer");
         startIndex = buffer.writerIndex();
     }
 
@@ -73,48 +73,45 @@ public class ByteBufOutputStream extends OutputStream implements DataOutput {
 
     @Override
     public void write(int b) throws IOException {
-        buffer.writeByte((byte) b);
+        buffer.writeByte(b);
     }
 
     @Override
     public void writeBoolean(boolean v) throws IOException {
-        write(v? (byte) 1 : (byte) 0);
+        buffer.writeBoolean(v);
     }
 
     @Override
     public void writeByte(int v) throws IOException {
-        write(v);
+        buffer.writeByte(v);
     }
 
     @Override
     public void writeBytes(String s) throws IOException {
-        int len = s.length();
-        for (int i = 0; i < len; i ++) {
-            write((byte) s.charAt(i));
-        }
+        buffer.writeCharSequence(s, CharsetUtil.US_ASCII);
     }
 
     @Override
     public void writeChar(int v) throws IOException {
-        writeShort((short) v);
+        buffer.writeChar(v);
     }
 
     @Override
     public void writeChars(String s) throws IOException {
         int len = s.length();
         for (int i = 0 ; i < len ; i ++) {
-            writeChar(s.charAt(i));
+            buffer.writeChar(s.charAt(i));
         }
     }
 
     @Override
     public void writeDouble(double v) throws IOException {
-        writeLong(Double.doubleToLongBits(v));
+        buffer.writeDouble(v);
     }
 
     @Override
     public void writeFloat(float v) throws IOException {
-        writeInt(Float.floatToIntBits(v));
+        buffer.writeFloat(v);
     }
 
     @Override

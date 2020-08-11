@@ -1,5 +1,5 @@
 /*
- * Copyright 2012 The Netty Project
+ * Copyright 2019 The Netty Project
  *
  * The Netty Project licenses this file to you under the Apache License,
  * version 2.0 (the "License"); you may not use this file except in compliance
@@ -86,11 +86,26 @@ public class WebSocket13FrameDecoder extends WebSocket08FrameDecoder {
      *            Maximum length of a frame's payload. Setting this to an appropriate value for you application
      *            helps check for denial of services attacks.
      * @param allowMaskMismatch
-     *            Allows to loosen the masking requirement on received frames. When this is set to false then also
-     *            frames which are not masked properly according to the standard will still be accepted.
+     *            When set to true, frames which are not masked properly according to the standard will still be
+     *            accepted.
      */
     public WebSocket13FrameDecoder(boolean expectMaskedFrames, boolean allowExtensions, int maxFramePayloadLength,
                                    boolean allowMaskMismatch) {
-        super(expectMaskedFrames, allowExtensions, maxFramePayloadLength, allowMaskMismatch);
+        this(WebSocketDecoderConfig.newBuilder()
+            .expectMaskedFrames(expectMaskedFrames)
+            .allowExtensions(allowExtensions)
+            .maxFramePayloadLength(maxFramePayloadLength)
+            .allowMaskMismatch(allowMaskMismatch)
+            .build());
+    }
+
+    /**
+     * Constructor
+     *
+     * @param decoderConfig
+     *            Frames decoder configuration.
+     */
+    public WebSocket13FrameDecoder(WebSocketDecoderConfig decoderConfig) {
+        super(decoderConfig);
     }
 }

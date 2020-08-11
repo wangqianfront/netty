@@ -15,6 +15,8 @@
  */
 package io.netty.buffer;
 
+import io.netty.util.internal.ObjectUtil;
+
 import java.nio.ByteOrder;
 
 /**
@@ -26,15 +28,12 @@ final class UnreleasableByteBuf extends WrappedByteBuf {
     private SwappedByteBuf swappedBuf;
 
     UnreleasableByteBuf(ByteBuf buf) {
-        super(buf);
+        super(buf instanceof UnreleasableByteBuf ? buf.unwrap() : buf);
     }
 
     @Override
     public ByteBuf order(ByteOrder endianness) {
-        if (endianness == null) {
-            throw new NullPointerException("endianness");
-        }
-        if (endianness == order()) {
+        if (ObjectUtil.checkNotNull(endianness, "endianness") == order()) {
             return this;
         }
 
@@ -47,7 +46,7 @@ final class UnreleasableByteBuf extends WrappedByteBuf {
 
     @Override
     public ByteBuf asReadOnly() {
-        return new UnreleasableByteBuf(buf.asReadOnly());
+        return buf.isReadOnly() ? this : new UnreleasableByteBuf(buf.asReadOnly());
     }
 
     @Override
@@ -56,8 +55,24 @@ final class UnreleasableByteBuf extends WrappedByteBuf {
     }
 
     @Override
+    public ByteBuf readRetainedSlice(int length) {
+        // We could call buf.readSlice(..), and then call buf.release(). However this creates a leak in unit tests
+        // because the release method on UnreleasableByteBuf will never allow the leak record to be cleaned up.
+        // So we just use readSlice(..) because the end result should be logically equivalent.
+        return readSlice(length);
+    }
+
+    @Override
     public ByteBuf slice() {
         return new UnreleasableByteBuf(buf.slice());
+    }
+
+    @Override
+    public ByteBuf retainedSlice() {
+        // We could call buf.retainedSlice(), and then call buf.release(). However this creates a leak in unit tests
+        // because the release method on UnreleasableByteBuf will never allow the leak record to be cleaned up.
+        // So we just use slice() because the end result should be logically equivalent.
+        return slice();
     }
 
     @Override
@@ -66,8 +81,24 @@ final class UnreleasableByteBuf extends WrappedByteBuf {
     }
 
     @Override
+    public ByteBuf retainedSlice(int index, int length) {
+        // We could call buf.retainedSlice(..), and then call buf.release(). However this creates a leak in unit tests
+        // because the release method on UnreleasableByteBuf will never allow the leak record to be cleaned up.
+        // So we just use slice(..) because the end result should be logically equivalent.
+        return slice(index, length);
+    }
+
+    @Override
     public ByteBuf duplicate() {
         return new UnreleasableByteBuf(buf.duplicate());
+    }
+
+    @Override
+    public ByteBuf retainedDuplicate() {
+        // We could call buf.retainedDuplicate(), and then call buf.release(). However this creates a leak in unit tests
+        // because the release method on UnreleasableByteBuf will never allow the leak record to be cleaned up.
+        // So we just use duplicate() because the end result should be logically equivalent.
+        return duplicate();
     }
 
     @Override

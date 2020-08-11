@@ -23,18 +23,21 @@ import io.netty.handler.codec.http.FullHttpResponse;
 import io.netty.handler.codec.http.HttpHeaderNames;
 import io.netty.handler.codec.http.HttpStatusClass;
 import io.netty.handler.codec.http.HttpUtil;
+import io.netty.util.internal.UnstableApi;
 
 import static io.netty.handler.codec.http2.Http2Error.INTERNAL_ERROR;
 import static io.netty.handler.codec.http2.Http2Error.PROTOCOL_ERROR;
 import static io.netty.handler.codec.http2.Http2Exception.connectionError;
+import static io.netty.handler.codec.http.HttpResponseStatus.OK;
 import static io.netty.util.internal.ObjectUtil.checkNotNull;
 
 /**
  * This adapter provides just header/data events from the HTTP message flow defined
- * here <a href="http://tools.ietf.org/html/draft-ietf-httpbis-http2-16#section-8.1.">HTTP/2 Spec Message Flow</a>.
+ * in <a href="https://tools.ietf.org/html/rfc7540#section-8.1">[RFC 7540], Section 8.1</a>.
  * <p>
  * See {@link HttpToHttp2ConnectionHandler} to get translation from HTTP/1.x objects to HTTP/2 frames for writes.
  */
+@UnstableApi
 public class InboundHttp2ToHttpAdapter extends Http2EventAdapter {
     private static final ImmediateSendDetector DEFAULT_SEND_DETECTOR = new ImmediateSendDetector() {
         @Override
@@ -49,9 +52,9 @@ public class InboundHttp2ToHttpAdapter extends Http2EventAdapter {
         }
 
         @Override
-        public FullHttpMessage copyIfNeeded(FullHttpMessage msg) {
+        public FullHttpMessage copyIfNeeded(ByteBufAllocator allocator, FullHttpMessage msg) {
             if (msg instanceof FullHttpRequest) {
-                FullHttpRequest copy = ((FullHttpRequest) msg).copy(null);
+                FullHttpRequest copy = ((FullHttpRequest) msg).replace(allocator.buffer(0));
                 copy.headers().remove(HttpHeaderNames.EXPECT);
                 return copy;
             }
@@ -69,11 +72,10 @@ public class InboundHttp2ToHttpAdapter extends Http2EventAdapter {
     protected InboundHttp2ToHttpAdapter(Http2Connection connection, int maxContentLength,
                                         boolean validateHttpHeaders, boolean propagateSettings) {
 
-        checkNotNull(connection, "connection");
         if (maxContentLength <= 0) {
             throw new IllegalArgumentException("maxContentLength: " + maxContentLength + " (expected: > 0)");
         }
-        this.connection = connection;
+        this.connection = checkNotNull(connection, "connection");
         this.maxContentLength = maxContentLength;
         this.validateHttpHeaders = validateHttpHeaders;
         this.propagateSettings = propagateSettings;
@@ -124,7 +126,7 @@ public class InboundHttp2ToHttpAdapter extends Http2EventAdapter {
      *
      * @param ctx The context to fire the event on
      * @param msg The message to send
-     * @param release {@code true} to release if present in {@link #messageMap}. {@code false} otherwise.
+     * @param release {@code true} to call release on the value if it is present. {@code false} to not call release.
      * @param stream the stream of the message which is being fired
      */
     protected void fireChannelRead(ChannelHandlerContext ctx, FullHttpMessage msg, boolean release,
@@ -150,8 +152,8 @@ public class InboundHttp2ToHttpAdapter extends Http2EventAdapter {
     protected FullHttpMessage newMessage(Http2Stream stream, Http2Headers headers, boolean validateHttpHeaders,
                                          ByteBufAllocator alloc)
             throws Http2Exception {
-        return connection.isServer() ? HttpConversionUtil.toHttpRequest(stream.id(), headers, alloc,
-                validateHttpHeaders) : HttpConversionUtil.toHttpResponse(stream.id(), headers, alloc,
+        return connection.isServer() ? HttpConversionUtil.toFullHttpRequest(stream.id(), headers, alloc,
+                validateHttpHeaders) : HttpConversionUtil.toFullHttpResponse(stream.id(), headers, alloc,
                                                                          validateHttpHeaders);
     }
 
@@ -196,7 +198,7 @@ public class InboundHttp2ToHttpAdapter extends Http2EventAdapter {
         if (sendDetector.mustSendImmediately(msg)) {
             // Copy the message (if necessary) before sending. The content is not expected to be copied (or used) in
             // this operation but just in case it is used do the copy before sending and the resource may be released
-            final FullHttpMessage copy = endOfStream ? null : sendDetector.copyIfNeeded(msg);
+            final FullHttpMessage copy = endOfStream ? null : sendDetector.copyIfNeeded(ctx.alloc(), msg);
             fireChannelRead(ctx, msg, release, stream);
             return copy;
         }
@@ -265,6 +267,14 @@ public class InboundHttp2ToHttpAdapter extends Http2EventAdapter {
         Http2Stream stream = connection.stream(streamId);
         FullHttpMessage msg = processHeadersBegin(ctx, stream, headers, endOfStream, true, true);
         if (msg != null) {
+            // Add headers for dependency and weight.
+            // See https://github.com/netty/netty/issues/5866
+            if (streamDependency != Http2CodecUtil.CONNECTION_STREAM_ID) {
+                msg.headers().setInt(HttpConversionUtil.ExtensionHeaderNames.STREAM_DEPENDENCY_ID.text(),
+                        streamDependency);
+            }
+            msg.headers().setShort(HttpConversionUtil.ExtensionHeaderNames.STREAM_WEIGHT.text(), weight);
+
             processHeadersEnd(ctx, stream, msg, endOfStream);
         }
     }
@@ -285,6 +295,14 @@ public class InboundHttp2ToHttpAdapter extends Http2EventAdapter {
             Http2Headers headers, int padding) throws Http2Exception {
         // A push promise should not be allowed to add headers to an existing stream
         Http2Stream promisedStream = connection.stream(promisedStreamId);
+        if (headers.status() == null) {
+            // A PUSH_PROMISE frame has no Http response status.
+            // https://tools.ietf.org/html/rfc7540#section-8.2.1
+            // Server push is semantically equivalent to a server responding to a
+            // request; however, in this case, that request is also sent by the
+            // server, as a PUSH_PROMISE frame.
+            headers.status(OK.codeAsText());
+        }
         FullHttpMessage msg = processHeadersBegin(ctx, promisedStream, headers, false, false, false);
         if (msg == null) {
             throw connectionError(PROTOCOL_ERROR, "Push Promise Frame received for pre-existing stream id %d",
@@ -292,6 +310,8 @@ public class InboundHttp2ToHttpAdapter extends Http2EventAdapter {
         }
 
         msg.headers().setInt(HttpConversionUtil.ExtensionHeaderNames.STREAM_PROMISE_ID.text(), streamId);
+        msg.headers().setShort(HttpConversionUtil.ExtensionHeaderNames.STREAM_WEIGHT.text(),
+                Http2CodecUtil.DEFAULT_PRIORITY_WEIGHT);
 
         processHeadersEnd(ctx, promisedStream, msg, false);
     }
@@ -332,9 +352,10 @@ public class InboundHttp2ToHttpAdapter extends Http2EventAdapter {
          * with a 'Expect: 100-continue' header. The message will be sent immediately,
          * and the data will be queued and sent at the end of the stream.
          *
+         * @param allocator The {@link ByteBufAllocator} that can be used to allocate
          * @param msg The message which has just been sent due to {@link #mustSendImmediately(FullHttpMessage)}
          * @return A modified copy of the {@code msg} or {@code null} if a copy is not needed.
          */
-        FullHttpMessage copyIfNeeded(FullHttpMessage msg);
+        FullHttpMessage copyIfNeeded(ByteBufAllocator allocator, FullHttpMessage msg);
     }
 }

@@ -18,6 +18,7 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelOutboundHandler;
 import io.netty.channel.ChannelPromise;
 import io.netty.util.AsciiString;
+import io.netty.util.internal.ObjectUtil;
 
 import java.net.SocketAddress;
 import java.util.Collection;
@@ -115,14 +116,8 @@ public class HttpClientUpgradeHandler extends HttpObjectAggregator implements Ch
     public HttpClientUpgradeHandler(SourceCodec sourceCodec, UpgradeCodec upgradeCodec,
                                     int maxContentLength) {
         super(maxContentLength);
-        if (sourceCodec == null) {
-            throw new NullPointerException("sourceCodec");
-        }
-        if (upgradeCodec == null) {
-            throw new NullPointerException("upgradeCodec");
-        }
-        this.sourceCodec = sourceCodec;
-        this.upgradeCodec = upgradeCodec;
+        this.sourceCodec = ObjectUtil.checkNotNull(sourceCodec, "sourceCodec");
+        this.upgradeCodec = ObjectUtil.checkNotNull(upgradeCodec, "upgradeCodec");
     }
 
     @Override
@@ -195,6 +190,20 @@ public class HttpClientUpgradeHandler extends HttpObjectAggregator implements Ch
                 throw new IllegalStateException("Read HTTP response without requesting protocol switch");
             }
 
+            if (msg instanceof HttpResponse) {
+                HttpResponse rep = (HttpResponse) msg;
+                if (!SWITCHING_PROTOCOLS.equals(rep.status())) {
+                    // The server does not support the requested protocol, just remove this handler
+                    // and continue processing HTTP.
+                    // NOTE: not releasing the response since we're letting it propagate to the
+                    // next handler.
+                    ctx.fireUserEventTriggered(UpgradeEvent.UPGRADE_REJECTED);
+                    removeThisHandler(ctx);
+                    ctx.fireChannelRead(msg);
+                    return;
+                }
+            }
+
             if (msg instanceof FullHttpResponse) {
                 response = (FullHttpResponse) msg;
                 // Need to retain since the base class will release after returning from this method.
@@ -210,16 +219,6 @@ public class HttpClientUpgradeHandler extends HttpObjectAggregator implements Ch
 
                 assert out.size() == 1;
                 response = (FullHttpResponse) out.get(0);
-            }
-
-            if (!SWITCHING_PROTOCOLS.equals(response.status())) {
-                // The server does not support the requested protocol, just remove this handler
-                // and continue processing HTTP.
-                // NOTE: not releasing the response since we're letting it propagate to the
-                // next handler.
-                ctx.fireUserEventTriggered(UpgradeEvent.UPGRADE_REJECTED);
-                removeThisHandler(ctx);
-                return;
             }
 
             CharSequence upgradeHeader = response.headers().get(HttpHeaderNames.UPGRADE);
@@ -273,6 +272,6 @@ public class HttpClientUpgradeHandler extends HttpObjectAggregator implements Ch
             builder.append(',');
         }
         builder.append(HttpHeaderValues.UPGRADE);
-        request.headers().set(HttpHeaderNames.CONNECTION, builder.toString());
+        request.headers().add(HttpHeaderNames.CONNECTION, builder.toString());
     }
 }

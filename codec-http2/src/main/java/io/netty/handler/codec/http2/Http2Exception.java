@@ -15,6 +15,10 @@
 
 package io.netty.handler.codec.http2;
 
+import io.netty.util.internal.PlatformDependent;
+import io.netty.util.internal.SuppressJava6Requirement;
+import io.netty.util.internal.UnstableApi;
+
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
@@ -25,6 +29,7 @@ import static io.netty.util.internal.ObjectUtil.checkNotNull;
 /**
  * Exception thrown when an HTTP/2 error was encountered.
  */
+@UnstableApi
 public class Http2Exception extends Exception {
     private static final long serialVersionUID = -6941186345430164209L;
     private final Http2Error error;
@@ -59,6 +64,22 @@ public class Http2Exception extends Exception {
         this.shutdownHint = checkNotNull(shutdownHint, "shutdownHint");
     }
 
+    static Http2Exception newStatic(Http2Error error, String message, ShutdownHint shutdownHint) {
+        if (PlatformDependent.javaVersion() >= 7) {
+            return new Http2Exception(error, message, shutdownHint, true);
+        }
+        return new Http2Exception(error, message, shutdownHint);
+    }
+
+    @SuppressJava6Requirement(reason = "uses Java 7+ Exception.<init>(String, Throwable, boolean, boolean)" +
+            " but is guarded by version checks")
+    private Http2Exception(Http2Error error, String message, ShutdownHint shutdownHint, boolean shared) {
+        super(message, null, false, true);
+        assert shared;
+        this.error = checkNotNull(error, "error");
+        this.shutdownHint = checkNotNull(shutdownHint, "shutdownHint");
+    }
+
     public Http2Error error() {
         return error;
     }
@@ -76,7 +97,7 @@ public class Http2Exception extends Exception {
      * @param error The type of error as defined by the HTTP/2 specification.
      * @param fmt String with the content and format for the additional debug data.
      * @param args Objects which fit into the format defined by {@code fmt}.
-     * @return An exception which can be translated into a HTTP/2 error.
+     * @return An exception which can be translated into an HTTP/2 error.
      */
     public static Http2Exception connectionError(Http2Error error, String fmt, Object... args) {
         return new Http2Exception(error, String.format(fmt, args));
@@ -89,7 +110,7 @@ public class Http2Exception extends Exception {
      * @param cause The object which caused the error.
      * @param fmt String with the content and format for the additional debug data.
      * @param args Objects which fit into the format defined by {@code fmt}.
-     * @return An exception which can be translated into a HTTP/2 error.
+     * @return An exception which can be translated into an HTTP/2 error.
      */
     public static Http2Exception connectionError(Http2Error error, Throwable cause,
             String fmt, Object... args) {
@@ -102,7 +123,7 @@ public class Http2Exception extends Exception {
      * @param error The type of error as defined by the HTTP/2 specification.
      * @param fmt String with the content and format for the additional debug data.
      * @param args Objects which fit into the format defined by {@code fmt}.
-     * @return An exception which can be translated into a HTTP/2 error.
+     * @return An exception which can be translated into an HTTP/2 error.
      */
     public static Http2Exception closedStreamError(Http2Error error, String fmt, Object... args) {
         return new ClosedStreamCreationException(error, String.format(fmt, args));
@@ -147,6 +168,28 @@ public class Http2Exception extends Exception {
     }
 
     /**
+     * A specific stream error resulting from failing to decode headers that exceeds the max header size list.
+     * If the {@code id} is not {@link Http2CodecUtil#CONNECTION_STREAM_ID} then a
+     * {@link Http2Exception.StreamException} will be returned. Otherwise the error is considered a
+     * connection error and a {@link Http2Exception} is returned.
+     * @param id The stream id for which the error is isolated to.
+     * @param error The type of error as defined by the HTTP/2 specification.
+     * @param onDecode Whether this error was caught while decoding headers
+     * @param fmt String with the content and format for the additional debug data.
+     * @param args Objects which fit into the format defined by {@code fmt}.
+     * @return If the {@code id} is not
+     * {@link Http2CodecUtil#CONNECTION_STREAM_ID} then a {@link HeaderListSizeException}
+     * will be returned. Otherwise the error is considered a connection error and a {@link Http2Exception} is
+     * returned.
+     */
+    public static Http2Exception headerListSizeError(int id, Http2Error error, boolean onDecode,
+            String fmt, Object... args) {
+        return CONNECTION_STREAM_ID == id ?
+                Http2Exception.connectionError(error, fmt, args) :
+                    new HeaderListSizeException(id, error, String.format(fmt, args), onDecode);
+    }
+
+    /**
      * Check if an exception is isolated to a single stream or the entire connection.
      * @param e The exception to check.
      * @return {@code true} if {@code e} is an instance of {@link Http2Exception.StreamException}.
@@ -169,7 +212,7 @@ public class Http2Exception extends Exception {
     /**
      * Provides a hint as to if shutdown is justified, what type of shutdown should be executed.
      */
-    public static enum ShutdownHint {
+    public enum ShutdownHint {
         /**
          * Do not shutdown the underlying channel.
          */
@@ -182,7 +225,7 @@ public class Http2Exception extends Exception {
         /**
          * Close the channel immediately after a {@code GOAWAY} is sent.
          */
-        HARD_SHUTDOWN;
+        HARD_SHUTDOWN
     }
 
     /**
@@ -207,7 +250,7 @@ public class Http2Exception extends Exception {
     /**
      * Represents an exception that can be isolated to a single stream (as opposed to the entire connection).
      */
-    public static final class StreamException extends Http2Exception {
+    public static class StreamException extends Http2Exception {
         private static final long serialVersionUID = 602472544416984384L;
         private final int streamId;
 
@@ -223,6 +266,21 @@ public class Http2Exception extends Exception {
 
         public int streamId() {
             return streamId;
+        }
+    }
+
+    public static final class HeaderListSizeException extends StreamException {
+        private static final long serialVersionUID = -8807603212183882637L;
+
+        private final boolean decode;
+
+        HeaderListSizeException(int streamId, Http2Error error, String message, boolean decode) {
+            super(streamId, error, message);
+            this.decode = decode;
+        }
+
+        public boolean duringDecode() {
+            return decode;
         }
     }
 

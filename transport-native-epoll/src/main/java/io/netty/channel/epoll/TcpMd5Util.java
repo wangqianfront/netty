@@ -39,9 +39,7 @@ final class TcpMd5Util {
             if (e.getKey() == null) {
                 throw new IllegalArgumentException("newKeys contains an entry with null address: " + newKeys);
             }
-            if (key == null) {
-                throw new NullPointerException("newKeys[" + e.getKey() + ']');
-            }
+            ObjectUtil.checkNotNull(key, "newKeys[" + e.getKey() + ']');
             if (key.length == 0) {
                 throw new IllegalArgumentException("newKeys[" + e.getKey() + "] has an empty key.");
             }
@@ -55,7 +53,7 @@ final class TcpMd5Util {
         // Remove mappings not present in the new set.
         for (InetAddress addr : current) {
             if (!newKeys.containsKey(addr)) {
-                Native.setTcpMd5Sig(channel.fd().intValue(), addr, null);
+                channel.socket.setTcpMd5Sig(addr, null);
             }
         }
 
@@ -66,7 +64,7 @@ final class TcpMd5Util {
         // Set new mappings and store addresses which we set.
         final Collection<InetAddress> addresses = new ArrayList<InetAddress>(newKeys.size());
         for (Entry<InetAddress, byte[]> e : newKeys.entrySet()) {
-            Native.setTcpMd5Sig(channel.fd().intValue(), e.getKey(), e.getValue());
+            channel.socket.setTcpMd5Sig(e.getKey(), e.getValue());
             addresses.add(e.getKey());
         }
 

@@ -15,10 +15,11 @@
  */
 package io.netty.handler.codec.http2;
 
+import io.netty.util.internal.UnstableApi;
+
 /** HTTP/2 RST_STREAM frame. */
+@UnstableApi
 public interface Http2ResetFrame extends Http2StreamFrame {
-    @Override
-    Http2ResetFrame setStream(Object stream);
 
     /**
      * The reason for resetting the stream. Represented as an HTTP/2 error code.

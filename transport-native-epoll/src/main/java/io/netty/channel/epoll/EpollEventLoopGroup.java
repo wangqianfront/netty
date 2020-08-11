@@ -18,9 +18,12 @@ package io.netty.channel.epoll;
 import io.netty.channel.DefaultSelectStrategyFactory;
 import io.netty.channel.EventLoop;
 import io.netty.channel.EventLoopGroup;
+import io.netty.channel.EventLoopTaskQueueFactory;
 import io.netty.channel.MultithreadEventLoopGroup;
 import io.netty.channel.SelectStrategyFactory;
-import io.netty.util.concurrent.EventExecutor;
+import io.netty.util.concurrent.EventExecutorChooserFactory;
+import io.netty.util.concurrent.RejectedExecutionHandler;
+import io.netty.util.concurrent.RejectedExecutionHandlers;
 
 import java.util.concurrent.Executor;
 import java.util.concurrent.ThreadFactory;
@@ -30,6 +33,10 @@ import java.util.concurrent.ThreadFactory;
  * it only works on linux.
  */
 public final class EpollEventLoopGroup extends MultithreadEventLoopGroup {
+    {
+        // Ensure JNI is initialized by the time this class is loaded.
+        Epoll.ensureAvailability();
+    }
 
     /**
      * Create a new instance using the default number of threads and the default {@link ThreadFactory}.
@@ -43,6 +50,14 @@ public final class EpollEventLoopGroup extends MultithreadEventLoopGroup {
      */
     public EpollEventLoopGroup(int nThreads) {
         this(nThreads, (ThreadFactory) null);
+    }
+
+    /**
+     * Create a new instance using the default number of threads and the given {@link ThreadFactory}.
+     */
+    @SuppressWarnings("deprecation")
+    public EpollEventLoopGroup(ThreadFactory threadFactory) {
+        this(0, threadFactory, 0);
     }
 
     /**
@@ -94,26 +109,46 @@ public final class EpollEventLoopGroup extends MultithreadEventLoopGroup {
     @Deprecated
     public EpollEventLoopGroup(int nThreads, ThreadFactory threadFactory, int maxEventsAtOnce,
                                SelectStrategyFactory selectStrategyFactory) {
-        super(nThreads, threadFactory, maxEventsAtOnce, selectStrategyFactory);
+        super(nThreads, threadFactory, maxEventsAtOnce, selectStrategyFactory, RejectedExecutionHandlers.reject());
     }
 
     public EpollEventLoopGroup(int nThreads, Executor executor, SelectStrategyFactory selectStrategyFactory) {
-        super(nThreads, executor, 0, selectStrategyFactory);
+        super(nThreads, executor, 0, selectStrategyFactory, RejectedExecutionHandlers.reject());
+    }
+
+    public EpollEventLoopGroup(int nThreads, Executor executor, EventExecutorChooserFactory chooserFactory,
+                               SelectStrategyFactory selectStrategyFactory) {
+        super(nThreads, executor, chooserFactory, 0, selectStrategyFactory, RejectedExecutionHandlers.reject());
+    }
+
+    public EpollEventLoopGroup(int nThreads, Executor executor, EventExecutorChooserFactory chooserFactory,
+                               SelectStrategyFactory selectStrategyFactory,
+                               RejectedExecutionHandler rejectedExecutionHandler) {
+        super(nThreads, executor, chooserFactory, 0, selectStrategyFactory, rejectedExecutionHandler);
+    }
+
+    public EpollEventLoopGroup(int nThreads, Executor executor, EventExecutorChooserFactory chooserFactory,
+                               SelectStrategyFactory selectStrategyFactory,
+                               RejectedExecutionHandler rejectedExecutionHandler,
+                               EventLoopTaskQueueFactory queueFactory) {
+        super(nThreads, executor, chooserFactory, 0, selectStrategyFactory, rejectedExecutionHandler, queueFactory);
     }
 
     /**
-     * Sets the percentage of the desired amount of time spent for I/O in the child event loops.  The default value is
-     * {@code 50}, which means the event loop will try to spend the same amount of time for I/O as for non-I/O tasks.
+     * @deprecated This method will be removed in future releases, and is not guaranteed to have any impacts.
      */
+    @Deprecated
     public void setIoRatio(int ioRatio) {
-        for (EventExecutor e: children()) {
-            ((EpollEventLoop) e).setIoRatio(ioRatio);
+        if (ioRatio <= 0 || ioRatio > 100) {
+            throw new IllegalArgumentException("ioRatio: " + ioRatio + " (expected: 0 < ioRatio <= 100)");
         }
     }
 
     @Override
     protected EventLoop newChild(Executor executor, Object... args) throws Exception {
+        EventLoopTaskQueueFactory queueFactory = args.length == 4 ? (EventLoopTaskQueueFactory) args[3] : null;
         return new EpollEventLoop(this, executor, (Integer) args[0],
-                ((SelectStrategyFactory) args[1]).newSelectStrategy());
+                ((SelectStrategyFactory) args[1]).newSelectStrategy(),
+                (RejectedExecutionHandler) args[2], queueFactory);
     }
 }

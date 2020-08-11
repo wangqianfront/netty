@@ -24,6 +24,7 @@ import io.netty.channel.ChannelId;
 import io.netty.channel.ServerChannel;
 import io.netty.util.ReferenceCountUtil;
 import io.netty.util.concurrent.EventExecutor;
+import io.netty.util.internal.ObjectUtil;
 import io.netty.util.internal.PlatformDependent;
 import io.netty.util.internal.StringUtil;
 
@@ -52,6 +53,7 @@ public class DefaultChannelGroup extends AbstractSet<Channel> implements Channel
             remove(future.channel());
         }
     };
+    private final VoidChannelGroupFuture voidFuture = new VoidChannelGroupFuture(this);
     private final boolean stayClosed;
     private volatile boolean closed;
 
@@ -90,9 +92,7 @@ public class DefaultChannelGroup extends AbstractSet<Channel> implements Channel
      * the same name, which means no duplicate check is done against group names.
      */
     public DefaultChannelGroup(String name, EventExecutor executor, boolean stayClosed) {
-        if (name == null) {
-            throw new NullPointerException("name");
-        }
+        ObjectUtil.checkNotNull(name, "name");
         this.name = name;
         this.executor = executor;
         this.stayClosed = stayClosed;
@@ -125,16 +125,12 @@ public class DefaultChannelGroup extends AbstractSet<Channel> implements Channel
 
     @Override
     public boolean contains(Object o) {
-        if (o instanceof Channel) {
-            Channel c = (Channel) o;
-            if (o instanceof ServerChannel) {
-                return serverChannels.containsValue(c);
-            } else {
-                return nonServerChannels.containsValue(c);
-            }
-        } else {
-            return false;
+        if (o instanceof ServerChannel) {
+            return serverChannels.containsValue(o);
+        } else if (o instanceof Channel) {
+            return nonServerChannels.containsValue(o);
         }
+        return false;
     }
 
     @Override
@@ -244,9 +240,9 @@ public class DefaultChannelGroup extends AbstractSet<Channel> implements Channel
     // See https://github.com/netty/netty/issues/1461
     private static Object safeDuplicate(Object message) {
         if (message instanceof ByteBuf) {
-            return ((ByteBuf) message).duplicate().retain();
+            return ((ByteBuf) message).retainedDuplicate();
         } else if (message instanceof ByteBufHolder) {
-            return ((ByteBufHolder) message).duplicate().retain();
+            return ((ByteBufHolder) message).retainedDuplicate();
         } else {
             return ReferenceCountUtil.retain(message);
         }
@@ -254,22 +250,33 @@ public class DefaultChannelGroup extends AbstractSet<Channel> implements Channel
 
     @Override
     public ChannelGroupFuture write(Object message, ChannelMatcher matcher) {
-        if (message == null) {
-            throw new NullPointerException("message");
-        }
-        if (matcher == null) {
-            throw new NullPointerException("matcher");
-        }
+        return write(message, matcher, false);
+    }
 
-        Map<Channel, ChannelFuture> futures = new LinkedHashMap<Channel, ChannelFuture>(size());
-        for (Channel c: nonServerChannels.values()) {
-            if (matcher.matches(c)) {
-                futures.put(c, c.write(safeDuplicate(message)));
+    @Override
+    public ChannelGroupFuture write(Object message, ChannelMatcher matcher, boolean voidPromise) {
+        ObjectUtil.checkNotNull(message, "message");
+        ObjectUtil.checkNotNull(matcher, "matcher");
+
+        final ChannelGroupFuture future;
+        if (voidPromise) {
+            for (Channel c: nonServerChannels.values()) {
+                if (matcher.matches(c)) {
+                    c.write(safeDuplicate(message), c.voidPromise());
+                }
             }
+            future = voidFuture;
+        } else {
+            Map<Channel, ChannelFuture> futures = new LinkedHashMap<Channel, ChannelFuture>(nonServerChannels.size());
+            for (Channel c: nonServerChannels.values()) {
+                if (matcher.matches(c)) {
+                    futures.put(c, c.write(safeDuplicate(message)));
+                }
+            }
+            future = new DefaultChannelGroupFuture(this, futures, executor);
         }
-
         ReferenceCountUtil.release(message);
-        return new DefaultChannelGroupFuture(this, futures, executor);
+        return future;
     }
 
     @Override
@@ -289,9 +296,7 @@ public class DefaultChannelGroup extends AbstractSet<Channel> implements Channel
 
     @Override
     public ChannelGroupFuture disconnect(ChannelMatcher matcher) {
-        if (matcher == null) {
-            throw new NullPointerException("matcher");
-        }
+        ObjectUtil.checkNotNull(matcher, "matcher");
 
         Map<Channel, ChannelFuture> futures =
                 new LinkedHashMap<Channel, ChannelFuture>(size());
@@ -312,9 +317,7 @@ public class DefaultChannelGroup extends AbstractSet<Channel> implements Channel
 
     @Override
     public ChannelGroupFuture close(ChannelMatcher matcher) {
-        if (matcher == null) {
-            throw new NullPointerException("matcher");
-        }
+        ObjectUtil.checkNotNull(matcher, "matcher");
 
         Map<Channel, ChannelFuture> futures =
                 new LinkedHashMap<Channel, ChannelFuture>(size());
@@ -345,9 +348,7 @@ public class DefaultChannelGroup extends AbstractSet<Channel> implements Channel
 
     @Override
     public ChannelGroupFuture deregister(ChannelMatcher matcher) {
-        if (matcher == null) {
-            throw new NullPointerException("matcher");
-        }
+        ObjectUtil.checkNotNull(matcher, "matcher");
 
         Map<Channel, ChannelFuture> futures =
                 new LinkedHashMap<Channel, ChannelFuture>(size());
@@ -383,21 +384,32 @@ public class DefaultChannelGroup extends AbstractSet<Channel> implements Channel
 
     @Override
     public ChannelGroupFuture writeAndFlush(Object message, ChannelMatcher matcher) {
-        if (message == null) {
-            throw new NullPointerException("message");
-        }
+        return writeAndFlush(message, matcher, false);
+    }
 
-        Map<Channel, ChannelFuture> futures = new LinkedHashMap<Channel, ChannelFuture>(size());
+    @Override
+    public ChannelGroupFuture writeAndFlush(Object message, ChannelMatcher matcher, boolean voidPromise) {
+        ObjectUtil.checkNotNull(message, "message");
 
-        for (Channel c: nonServerChannels.values()) {
-            if (matcher.matches(c)) {
-                futures.put(c, c.writeAndFlush(safeDuplicate(message)));
+        final ChannelGroupFuture future;
+        if (voidPromise) {
+            for (Channel c: nonServerChannels.values()) {
+                if (matcher.matches(c)) {
+                    c.writeAndFlush(safeDuplicate(message), c.voidPromise());
+                }
             }
+            future = voidFuture;
+        } else {
+            Map<Channel, ChannelFuture> futures = new LinkedHashMap<Channel, ChannelFuture>(nonServerChannels.size());
+            for (Channel c: nonServerChannels.values()) {
+                if (matcher.matches(c)) {
+                    futures.put(c, c.writeAndFlush(safeDuplicate(message)));
+                }
+            }
+            future = new DefaultChannelGroupFuture(this, futures, executor);
         }
-
         ReferenceCountUtil.release(message);
-
-        return new DefaultChannelGroupFuture(this, futures, executor);
+        return future;
     }
 
     @Override

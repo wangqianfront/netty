@@ -39,12 +39,17 @@
  */
 package io.netty.util.internal.logging;
 
+import io.netty.util.internal.ObjectUtil;
 import org.apache.commons.logging.Log;
 
 /**
  * <a href="http://commons.apache.org/logging/">Apache Commons Logging</a>
  * logger.
+ *
+ * @deprecated Please use {@link Log4J2Logger} or {@link Log4JLogger} or
+ * {@link Slf4JLogger}.
  */
+@Deprecated
 class CommonsLogger extends AbstractInternalLogger {
 
     private static final long serialVersionUID = 8647838678388394885L;
@@ -53,10 +58,7 @@ class CommonsLogger extends AbstractInternalLogger {
 
     CommonsLogger(Log logger, String name) {
         super(name);
-        if (logger == null) {
-            throw new NullPointerException("logger");
-        }
-        this.logger = logger;
+        this.logger = ObjectUtil.checkNotNull(logger, "logger");
     }
 
     /**

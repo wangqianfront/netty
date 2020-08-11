@@ -15,53 +15,18 @@
  */
 package io.netty.handler.ssl;
 
-import org.apache.tomcat.jni.SSL;
-import org.apache.tomcat.jni.SSLContext;
+import io.netty.internal.tcnative.SSL;
+import io.netty.internal.tcnative.SSLContext;
+
+import java.util.concurrent.locks.Lock;
 
 
 /**
  * {@link OpenSslSessionContext} implementation which offers extra methods which are only useful for the server-side.
  */
 public final class OpenSslServerSessionContext extends OpenSslSessionContext {
-    OpenSslServerSessionContext(long context) {
-        super(context);
-    }
-
-    @Override
-    public void setSessionTimeout(int seconds) {
-        if (seconds < 0) {
-            throw new IllegalArgumentException();
-        }
-        SSLContext.setSessionCacheTimeout(context, seconds);
-    }
-
-    @Override
-    public int getSessionTimeout() {
-        return (int) SSLContext.getSessionCacheTimeout(context);
-    }
-
-    @Override
-    public void setSessionCacheSize(int size) {
-        if (size < 0) {
-            throw new IllegalArgumentException();
-        }
-        SSLContext.setSessionCacheSize(context, size);
-    }
-
-    @Override
-    public int getSessionCacheSize() {
-        return (int) SSLContext.getSessionCacheSize(context);
-    }
-
-    @Override
-    public void setSessionCacheEnabled(boolean enabled) {
-        long mode = enabled ? SSL.SSL_SESS_CACHE_SERVER : SSL.SSL_SESS_CACHE_OFF;
-        SSLContext.setSessionCacheMode(context, mode);
-    }
-
-    @Override
-    public boolean isSessionCacheEnabled() {
-        return SSLContext.getSessionCacheMode(context) == SSL.SSL_SESS_CACHE_SERVER;
+    OpenSslServerSessionContext(ReferenceCountedOpenSslContext context, OpenSslKeyMaterialProvider provider) {
+        super(context, provider, SSL.SSL_SESS_CACHE_SERVER, new OpenSslSessionCache(context.engineMap));
     }
 
     /**
@@ -74,6 +39,12 @@ public final class OpenSslServerSessionContext extends OpenSslSessionContext {
      * @return {@code true} if success, {@code false} otherwise.
      */
     public boolean setSessionIdContext(byte[] sidCtx) {
-        return SSLContext.setSessionIdContext(context, sidCtx);
+        Lock writerLock = context.ctxLock.writeLock();
+        writerLock.lock();
+        try {
+            return SSLContext.setSessionIdContext(context.ctx, sidCtx);
+        } finally {
+            writerLock.unlock();
+        }
     }
 }

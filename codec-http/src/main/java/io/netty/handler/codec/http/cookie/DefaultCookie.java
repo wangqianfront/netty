@@ -15,7 +15,10 @@
  */
 package io.netty.handler.codec.http.cookie;
 
-import static io.netty.handler.codec.http.cookie.CookieUtil.*;
+import io.netty.handler.codec.http.cookie.CookieHeaderNames.SameSite;
+
+import static io.netty.handler.codec.http.cookie.CookieUtil.stringBuilder;
+import static io.netty.handler.codec.http.cookie.CookieUtil.validateAttributeValue;
 import static io.netty.util.internal.ObjectUtil.checkNotNull;
 
 /**
@@ -28,9 +31,10 @@ public class DefaultCookie implements Cookie {
     private boolean wrap;
     private String domain;
     private String path;
-    private long maxAge = Long.MIN_VALUE;
+    private long maxAge = UNDEFINED_MAX_AGE;
     private boolean secure;
     private boolean httpOnly;
+    private SameSite sameSite;
 
     /**
      * Creates a new cookie with the specified name and value.
@@ -119,6 +123,26 @@ public class DefaultCookie implements Cookie {
         this.httpOnly = httpOnly;
     }
 
+    /**
+     * Checks to see if this {@link Cookie} can be sent along cross-site requests.
+     * For more information, please look
+     * <a href="https://tools.ietf.org/html/draft-ietf-httpbis-rfc6265bis-05">here</a>
+     * @return <b>same-site-flag</b> value
+     */
+    public SameSite sameSite() {
+        return sameSite;
+    }
+
+    /**
+     * Determines if this this {@link Cookie} can be sent along cross-site requests.
+     * For more information, please look
+     *  <a href="https://tools.ietf.org/html/draft-ietf-httpbis-rfc6265bis-05">here</a>
+     * @param sameSite <b>same-site-flag</b> value
+     */
+    public void setSameSite(SameSite sameSite) {
+        this.sameSite = sameSite;
+    }
+
     @Override
     public int hashCode() {
         return name().hashCode();
@@ -135,7 +159,7 @@ public class DefaultCookie implements Cookie {
         }
 
         Cookie that = (Cookie) o;
-        if (!name().equalsIgnoreCase(that.name())) {
+        if (!name().equals(that.name())) {
             return false;
         }
 
@@ -153,8 +177,6 @@ public class DefaultCookie implements Cookie {
             if (that.domain() != null) {
                 return false;
             }
-        } else if (that.domain() == null) {
-            return false;
         } else {
             return domain().equalsIgnoreCase(that.domain());
         }
@@ -164,7 +186,7 @@ public class DefaultCookie implements Cookie {
 
     @Override
     public int compareTo(Cookie c) {
-        int v = name().compareToIgnoreCase(c.name());
+        int v = name().compareTo(c.name());
         if (v != 0) {
             return v;
         }
@@ -233,6 +255,9 @@ public class DefaultCookie implements Cookie {
         }
         if (isHttpOnly()) {
             buf.append(", HTTPOnly");
+        }
+        if (sameSite() != null) {
+            buf.append(", SameSite=").append(sameSite());
         }
         return buf.toString();
     }

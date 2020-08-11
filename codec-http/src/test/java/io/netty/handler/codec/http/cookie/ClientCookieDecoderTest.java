@@ -15,16 +15,9 @@
  */
 package io.netty.handler.codec.http.cookie;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
-
+import io.netty.handler.codec.DateFormatter;
+import io.netty.handler.codec.http.cookie.CookieHeaderNames.SameSite;
 import org.junit.Test;
-
-import io.netty.handler.codec.http.HttpHeaderDateFormat;
 
 import java.util.ArrayList;
 import java.util.Calendar;
@@ -33,31 +26,30 @@ import java.util.Date;
 import java.util.Iterator;
 import java.util.TimeZone;
 
+import static org.hamcrest.CoreMatchers.instanceOf;
+import static org.hamcrest.CoreMatchers.is;
+import static org.junit.Assert.*;
+
 public class ClientCookieDecoderTest {
     @Test
     public void testDecodingSingleCookieV0() {
-        String cookieString = "myCookie=myValue;expires=XXX;path=/apathsomewhere;domain=.adomainsomewhere;secure;";
-        cookieString = cookieString.replace("XXX", HttpHeaderDateFormat.get()
-                .format(new Date(System.currentTimeMillis() + 50000)));
+        String cookieString = "myCookie=myValue;expires="
+                + DateFormatter.format(new Date(System.currentTimeMillis() + 50000))
+                + ";path=/apathsomewhere;domain=.adomainsomewhere;secure;SameSite=None";
 
         Cookie cookie = ClientCookieDecoder.STRICT.decode(cookieString);
         assertNotNull(cookie);
         assertEquals("myValue", cookie.value());
         assertEquals(".adomainsomewhere", cookie.domain());
-
-        boolean fail = true;
-        for (int i = 40; i <= 60; i++) {
-            if (cookie.maxAge() == i) {
-                fail = false;
-                break;
-            }
-        }
-        if (fail) {
-            fail("expected: 50, actual: " + cookie.maxAge());
-        }
-
+        assertNotEquals("maxAge should be defined when parsing cookie " + cookieString,
+                Long.MIN_VALUE, cookie.maxAge());
+        assertTrue("maxAge should be about 50ms when parsing cookie " + cookieString,
+                cookie.maxAge() >= 40 && cookie.maxAge() <= 60);
         assertEquals("/apathsomewhere", cookie.path());
         assertTrue(cookie.isSecure());
+
+        assertThat(cookie, is(instanceOf(DefaultCookie.class)));
+        assertEquals(SameSite.None, ((DefaultCookie) cookie).sameSite());
     }
 
     @Test
@@ -218,6 +210,13 @@ public class ClientCookieDecoderTest {
     }
 
     @Test
+    public void testDecodingInvalidValuesWithCommaAtStart() {
+        assertNull(ClientCookieDecoder.STRICT.decode(","));
+        assertNull(ClientCookieDecoder.STRICT.decode(",a"));
+        assertNull(ClientCookieDecoder.STRICT.decode(",a=a"));
+    }
+
+    @Test
     public void testDecodingLongValue() {
         String longValue =
                 "b___$Q__$ha__<NC=MN(F__%#4__<NC=MN(F__2_d____#=IvZB__2_F____'=KqtH__2-9____" +
@@ -266,7 +265,7 @@ public class ClientCookieDecoderTest {
                 "'=KqtH";
 
         Cookie cookie = ClientCookieDecoder.STRICT.decode("bh=\"" + longValue
-                                                   + "\";");
+                + "\";");
         assertEquals("bh", cookie.name());
         assertEquals(longValue, cookie.value());
     }

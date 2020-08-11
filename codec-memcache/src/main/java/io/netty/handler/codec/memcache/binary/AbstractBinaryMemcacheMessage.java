@@ -17,10 +17,12 @@ package io.netty.handler.codec.memcache.binary;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.handler.codec.memcache.AbstractMemcacheObject;
+import io.netty.util.internal.UnstableApi;
 
 /**
  * Default implementation of a {@link BinaryMemcacheMessage}.
  */
+@UnstableApi
 public abstract class AbstractBinaryMemcacheMessage
     extends AbstractMemcacheObject
     implements BinaryMemcacheMessage {
@@ -76,7 +78,7 @@ public abstract class AbstractBinaryMemcacheMessage
         this.key = key;
         short oldKeyLength = keyLength;
         keyLength = key == null ? 0 : (short) key.readableBytes();
-        totalBodyLength  = totalBodyLength + keyLength - oldKeyLength;
+        totalBodyLength = totalBodyLength + keyLength - oldKeyLength;
         return this;
     }
 
@@ -229,5 +231,21 @@ public abstract class AbstractBinaryMemcacheMessage
             extras.touch(hint);
         }
         return this;
+    }
+
+    /**
+     * Copies special metadata hold by this instance to the provided instance
+     *
+     * @param dst The instance where to copy the metadata of this instance to
+     */
+    void copyMeta(AbstractBinaryMemcacheMessage dst) {
+        dst.magic = magic;
+        dst.opcode = opcode;
+        dst.keyLength = keyLength;
+        dst.extrasLength = extrasLength;
+        dst.dataType = dataType;
+        dst.totalBodyLength = totalBodyLength;
+        dst.opaque = opaque;
+        dst.cas = cas;
     }
 }

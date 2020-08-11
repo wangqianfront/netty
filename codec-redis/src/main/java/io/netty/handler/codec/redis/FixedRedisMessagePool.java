@@ -20,6 +20,7 @@ import io.netty.buffer.Unpooled;
 import io.netty.util.CharsetUtil;
 import io.netty.util.collection.LongObjectHashMap;
 import io.netty.util.collection.LongObjectMap;
+import io.netty.util.internal.UnstableApi;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -27,6 +28,7 @@ import java.util.Map;
 /**
  * A default fixed redis message pool.
  */
+@UnstableApi
 public final class FixedRedisMessagePool implements RedisMessagePool {
 
     private static final String[] DEFAULT_SIMPLE_STRINGS = {
@@ -69,13 +71,13 @@ public final class FixedRedisMessagePool implements RedisMessagePool {
     public static final FixedRedisMessagePool INSTANCE = new FixedRedisMessagePool();
 
     // internal caches.
-    private Map<ByteBuf, SimpleStringRedisMessage> byteBufToSimpleStrings;
-    private Map<String, SimpleStringRedisMessage> stringToSimpleStrings;
-    private Map<ByteBuf, ErrorRedisMessage> byteBufToErrors;
-    private Map<String, ErrorRedisMessage> stringToErrors;
-    private Map<ByteBuf, IntegerRedisMessage> byteBufToIntegers;
-    private LongObjectMap<IntegerRedisMessage> longToIntegers;
-    private LongObjectMap<byte[]> longToByteBufs;
+    private final Map<ByteBuf, SimpleStringRedisMessage> byteBufToSimpleStrings;
+    private final Map<String, SimpleStringRedisMessage> stringToSimpleStrings;
+    private final Map<ByteBuf, ErrorRedisMessage> byteBufToErrors;
+    private final Map<String, ErrorRedisMessage> stringToErrors;
+    private final Map<ByteBuf, IntegerRedisMessage> byteBufToIntegers;
+    private final LongObjectMap<IntegerRedisMessage> longToIntegers;
+    private final LongObjectMap<byte[]> longToByteBufs;
 
     /**
      * Creates a {@link FixedRedisMessagePool} instance.

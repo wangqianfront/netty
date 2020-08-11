@@ -22,6 +22,7 @@ import io.netty.channel.DefaultChannelConfig;
 import io.netty.channel.MessageSizeEstimator;
 import io.netty.channel.RecvByteBufAllocator;
 import io.netty.channel.WriteBufferWaterMark;
+import io.netty.util.internal.ObjectUtil;
 import io.netty.util.internal.PlatformDependent;
 
 import java.net.Socket;
@@ -44,10 +45,7 @@ public class DefaultSocketChannelConfig extends DefaultChannelConfig
      */
     public DefaultSocketChannelConfig(SocketChannel channel, Socket javaSocket) {
         super(channel);
-        if (javaSocket == null) {
-            throw new NullPointerException("javaSocket");
-        }
-        this.javaSocket = javaSocket;
+        this.javaSocket = ObjectUtil.checkNotNull(javaSocket, "javaSocket");
 
         // Enable TCP_NODELAY by default if possible.
         if (PlatformDependent.canEnableTcpNoDelayByDefault()) {
@@ -324,14 +322,12 @@ public class DefaultSocketChannelConfig extends DefaultChannelConfig
     }
 
     @Override
-    @Deprecated
     public SocketChannelConfig setWriteBufferHighWaterMark(int writeBufferHighWaterMark) {
         super.setWriteBufferHighWaterMark(writeBufferHighWaterMark);
         return this;
     }
 
     @Override
-    @Deprecated
     public SocketChannelConfig setWriteBufferLowWaterMark(int writeBufferLowWaterMark) {
         super.setWriteBufferLowWaterMark(writeBufferLowWaterMark);
         return this;

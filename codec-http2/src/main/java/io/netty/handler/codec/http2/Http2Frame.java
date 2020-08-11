@@ -15,5 +15,15 @@
  */
 package io.netty.handler.codec.http2;
 
+import io.netty.util.internal.UnstableApi;
+
 /** An HTTP/2 frame. */
-public interface Http2Frame { }
+@UnstableApi
+public interface Http2Frame {
+
+    /**
+     * Returns the name of the HTTP/2 frame e.g. DATA, GOAWAY, etc.
+     */
+    String name();
+
+}

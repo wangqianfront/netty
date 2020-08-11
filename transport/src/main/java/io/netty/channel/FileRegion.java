@@ -49,8 +49,6 @@ import java.nio.channels.WritableByteChannel;
  * performance.  For example, sending a large file doesn't work well in Windows.
  *
  * <h3>Not all transports support it</h3>
- *
- * Currently, the NIO transport is the only transport that supports {@link FileRegion}.
  */
 public interface FileRegion extends ReferenceCounted {
 
@@ -60,7 +58,7 @@ public interface FileRegion extends ReferenceCounted {
     long position();
 
     /**
-     * Returns the bytes which was transfered already.
+     * Returns the bytes which was transferred already.
      *
      * @deprecated Use {@link #transferred()} instead.
      */
@@ -68,7 +66,7 @@ public interface FileRegion extends ReferenceCounted {
     long transfered();
 
     /**
-     * Returns the bytes which was transfered already.
+     * Returns the bytes which was transferred already.
      */
     long transferred();
 

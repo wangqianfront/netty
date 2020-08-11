@@ -15,11 +15,12 @@
 
 package io.netty.handler.codec.redis;
 
-import io.netty.util.internal.StringUtil;
+import io.netty.util.internal.UnstableApi;
 
 /**
  * Simple Strings of <a href="http://redis.io/topics/protocol">RESP</a>.
  */
+@UnstableApi
 public final class SimpleStringRedisMessage extends AbstractStringRedisMessage {
 
     /**
@@ -31,12 +32,4 @@ public final class SimpleStringRedisMessage extends AbstractStringRedisMessage {
         super(content);
     }
 
-    @Override
-    public String toString() {
-        return new StringBuilder(StringUtil.simpleClassName(this))
-                .append('[')
-                .append("content=")
-                .append(content())
-                .append(']').toString();
-    }
 }

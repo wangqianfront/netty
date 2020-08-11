@@ -16,18 +16,20 @@
 package io.netty.handler.codec.base64;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
 import io.netty.util.CharsetUtil;
+import io.netty.util.internal.PlatformDependent;
+import io.netty.util.internal.StringUtil;
 import org.junit.Test;
 
-
 import java.io.ByteArrayInputStream;
-import java.nio.charset.Charset;
+import java.nio.ByteOrder;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 
 import static io.netty.buffer.Unpooled.copiedBuffer;
-import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.*;
 
 public class Base64Test {
 
@@ -92,7 +94,7 @@ public class Base64Test {
                 "8i96YWK0VxcCMQC7pf6Wk3RhUU2Sg6S9e6CiirFLDyzLkaWxuCnXcOwTvuXTHUQSeUCp2Q6ygS5q\n" +
                 "Kyc=";
 
-        ByteBuf src =  Unpooled.wrappedBuffer(certFromString(cert).getEncoded());
+        ByteBuf src = Unpooled.wrappedBuffer(certFromString(cert).getEncoded());
         ByteBuf expectedEncoded = copiedBuffer(expected, CharsetUtil.US_ASCII);
         testEncode(src, expectedEncoded);
     }
@@ -115,6 +117,72 @@ public class Base64Test {
             src.release();
             expectedEncoded.release();
             encoded.release();
+        }
+    }
+
+    @Test
+    public void testEncodeDecodeBE() {
+        testEncodeDecode(ByteOrder.BIG_ENDIAN);
+    }
+
+    @Test
+    public void testEncodeDecodeLE() {
+        testEncodeDecode(ByteOrder.LITTLE_ENDIAN);
+    }
+
+    private static void testEncodeDecode(ByteOrder order) {
+        testEncodeDecode(64, order);
+        testEncodeDecode(128, order);
+        testEncodeDecode(512, order);
+        testEncodeDecode(1024, order);
+        testEncodeDecode(4096, order);
+        testEncodeDecode(8192, order);
+        testEncodeDecode(16384, order);
+    }
+
+    private static void testEncodeDecode(int size, ByteOrder order) {
+        byte[] bytes = new byte[size];
+        PlatformDependent.threadLocalRandom().nextBytes(bytes);
+
+        ByteBuf src = Unpooled.wrappedBuffer(bytes).order(order);
+        ByteBuf encoded = Base64.encode(src);
+        ByteBuf decoded = Base64.decode(encoded);
+        ByteBuf expectedBuf = Unpooled.wrappedBuffer(bytes);
+        try {
+            assertEquals(StringUtil.NEWLINE + "expected: " + ByteBufUtil.hexDump(expectedBuf) +
+                         StringUtil.NEWLINE + "actual--: " + ByteBufUtil.hexDump(decoded), expectedBuf, decoded);
+        } finally {
+            src.release();
+            encoded.release();
+            decoded.release();
+            expectedBuf.release();
+        }
+    }
+
+    @Test
+    public void testOverflowEncodedBufferSize() {
+        assertEquals(Integer.MAX_VALUE, Base64.encodedBufferSize(Integer.MAX_VALUE, true));
+        assertEquals(Integer.MAX_VALUE, Base64.encodedBufferSize(Integer.MAX_VALUE, false));
+    }
+
+    @Test
+    public void testOverflowDecodedBufferSize() {
+        assertEquals(1610612736, Base64.decodedBufferSize(Integer.MAX_VALUE));
+    }
+
+    @Test
+    public void decodingFailsOnInvalidInputByte() {
+        char[] invalidChars = {'\u007F', '\u0080', '\u00BD', '\u00FF'};
+        for (char invalidChar : invalidChars) {
+            ByteBuf buf = copiedBuffer("eHh4" + invalidChar, CharsetUtil.ISO_8859_1);
+            try {
+                Base64.decode(buf);
+                fail("Invalid character in not detected: " + invalidChar);
+            } catch (IllegalArgumentException ignored) {
+                // as expected
+            } finally {
+                assertTrue(buf.release());
+            }
         }
     }
 }

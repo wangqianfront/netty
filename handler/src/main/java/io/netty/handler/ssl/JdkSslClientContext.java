@@ -16,6 +16,8 @@
 
 package io.netty.handler.ssl;
 
+import java.security.KeyStore;
+import java.security.Provider;
 import javax.net.ssl.KeyManager;
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
@@ -88,9 +90,6 @@ public final class JdkSslClientContext extends JdkSslContext {
     }
 
     /**
-     * @deprecated Use the constructors that accept {@link ApplicationProtocolConfig} or
-     *             {@link ApplicationProtocolNegotiator} instead.
-     *
      * Creates a new instance.
      *
      * @param certChainFile an X.509 certificate chain file in PEM format.
@@ -167,8 +166,17 @@ public final class JdkSslClientContext extends JdkSslContext {
             File certChainFile, TrustManagerFactory trustManagerFactory,
             Iterable<String> ciphers, CipherSuiteFilter cipherFilter, JdkApplicationProtocolNegotiator apn,
             long sessionCacheSize, long sessionTimeout) throws SSLException {
-        this(certChainFile, trustManagerFactory, null, null, null, null,
-                ciphers, cipherFilter, apn, sessionCacheSize, sessionTimeout);
+        this(null, certChainFile, trustManagerFactory, ciphers, cipherFilter, apn, sessionCacheSize, sessionTimeout);
+    }
+
+    JdkSslClientContext(Provider provider,
+                        File trustCertCollectionFile, TrustManagerFactory trustManagerFactory,
+                        Iterable<String> ciphers, CipherSuiteFilter cipherFilter, JdkApplicationProtocolNegotiator apn,
+                        long sessionCacheSize, long sessionTimeout) throws SSLException {
+        super(newSSLContext(provider, toX509CertificatesInternal(trustCertCollectionFile),
+                trustManagerFactory, null, null,
+                null, null, sessionCacheSize, sessionTimeout, KeyStore.getDefaultType()), true,
+                ciphers, cipherFilter, apn, ClientAuth.NONE, null, false);
     }
 
     /**
@@ -247,34 +255,41 @@ public final class JdkSslClientContext extends JdkSslContext {
             File keyCertChainFile, File keyFile, String keyPassword, KeyManagerFactory keyManagerFactory,
             Iterable<String> ciphers, CipherSuiteFilter cipherFilter, JdkApplicationProtocolNegotiator apn,
             long sessionCacheSize, long sessionTimeout) throws SSLException {
-        super(newSSLContext(toX509CertificatesInternal(
+        super(newSSLContext(null, toX509CertificatesInternal(
                 trustCertCollectionFile), trustManagerFactory,
                 toX509CertificatesInternal(keyCertChainFile), toPrivateKeyInternal(keyFile, keyPassword),
-                keyPassword, keyManagerFactory, sessionCacheSize, sessionTimeout), true,
-                ciphers, cipherFilter, apn, ClientAuth.NONE);
+                keyPassword, keyManagerFactory, sessionCacheSize, sessionTimeout, KeyStore.getDefaultType()), true,
+                ciphers, cipherFilter, apn, ClientAuth.NONE, null, false);
     }
 
-    JdkSslClientContext(X509Certificate[] trustCertCollection, TrustManagerFactory trustManagerFactory,
+    JdkSslClientContext(Provider sslContextProvider,
+                        X509Certificate[] trustCertCollection, TrustManagerFactory trustManagerFactory,
                         X509Certificate[] keyCertChain, PrivateKey key, String keyPassword,
                         KeyManagerFactory keyManagerFactory, Iterable<String> ciphers, CipherSuiteFilter cipherFilter,
-                        ApplicationProtocolConfig apn, long sessionCacheSize, long sessionTimeout) throws SSLException {
-        super(newSSLContext(trustCertCollection, trustManagerFactory, keyCertChain, key, keyPassword,
-                keyManagerFactory, sessionCacheSize, sessionTimeout), true,
-                ciphers, cipherFilter, toNegotiator(apn, false), ClientAuth.NONE);
+                        ApplicationProtocolConfig apn, String[] protocols, long sessionCacheSize, long sessionTimeout,
+                        String keyStoreType)
+            throws SSLException {
+        super(newSSLContext(sslContextProvider, trustCertCollection, trustManagerFactory,
+                            keyCertChain, key, keyPassword, keyManagerFactory, sessionCacheSize,
+                            sessionTimeout, keyStoreType),
+                true, ciphers, cipherFilter, toNegotiator(apn, false), ClientAuth.NONE, protocols, false);
     }
 
-    private static SSLContext newSSLContext(X509Certificate[] trustCertCollection,
+    private static SSLContext newSSLContext(Provider sslContextProvider,
+                                            X509Certificate[] trustCertCollection,
                                             TrustManagerFactory trustManagerFactory, X509Certificate[] keyCertChain,
                                             PrivateKey key, String keyPassword, KeyManagerFactory keyManagerFactory,
-                                            long sessionCacheSize, long sessionTimeout) throws SSLException {
+                                            long sessionCacheSize, long sessionTimeout,
+                                            String keyStore) throws SSLException {
         try {
             if (trustCertCollection != null) {
-                trustManagerFactory = buildTrustManagerFactory(trustCertCollection, trustManagerFactory);
+                trustManagerFactory = buildTrustManagerFactory(trustCertCollection, trustManagerFactory, keyStore);
             }
             if (keyCertChain != null) {
-                keyManagerFactory = buildKeyManagerFactory(keyCertChain, key, keyPassword, keyManagerFactory);
+                keyManagerFactory = buildKeyManagerFactory(keyCertChain, key, keyPassword, keyManagerFactory, keyStore);
             }
-            SSLContext ctx = SSLContext.getInstance(PROTOCOL);
+            SSLContext ctx = sslContextProvider == null ? SSLContext.getInstance(PROTOCOL)
+                : SSLContext.getInstance(PROTOCOL, sslContextProvider);
             ctx.init(keyManagerFactory == null ? null : keyManagerFactory.getKeyManagers(),
                      trustManagerFactory == null ? null : trustManagerFactory.getTrustManagers(),
                      null);
